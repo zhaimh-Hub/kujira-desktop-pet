@@ -678,8 +678,22 @@
       btnDel.title = '删除这段对话'
       btnDel.onclick = async (ev) => {
         ev.stopPropagation()
-        if (!confirm('删除这段对话？不可恢复')) return
-        await fetch(API + '/convs/' + encodeURIComponent(c.id), { method: 'DELETE' }).catch(() => {})
+        // 不用 window.confirm：无边框透明窗口里它不会弹出来，点了没反应
+        if (!btnDel.dataset.armed) {
+          btnDel.dataset.armed = '1'
+          btnDel.textContent = '确认'
+          btnDel.style.background = '#b93b3b'
+          btnDel.style.color = '#fff'
+          setTimeout(() => {
+            if (btnDel.dataset.armed) { delete btnDel.dataset.armed; btnDel.textContent = '删'; btnDel.style.background = ''; btnDel.style.color = '' }
+          }, 3000)
+          return
+        }
+        delete btnDel.dataset.armed
+        try {
+          const r = await fetch(API + '/convs/' + encodeURIComponent(c.id), { method: 'DELETE' })
+          if (!r.ok) tip.textContent = '删除失败：HTTP ' + r.status
+        } catch (e) { tip.textContent = '删除失败：' + e.message }
         openHistory()
       }
       row.append(g, btn, btnDel)
