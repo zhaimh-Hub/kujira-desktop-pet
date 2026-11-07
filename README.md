@@ -13,6 +13,9 @@
 
 ---
 
+![桌宠](assets/screenshot-pet.png)
+![对话与多步进度](assets/screenshot-chat.png)
+![任务面板](assets/screenshot-tasks.png)
 ## 功能
 
 | 模块 | 说明 |

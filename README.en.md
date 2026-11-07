@@ -12,6 +12,9 @@ Frameless transparent window with speech synthesis and lip sync, multi-step AI t
 
 ---
 
+![Desktop pet](assets/screenshot-pet.png)
+![Chat with multi-step progress](assets/screenshot-chat.png)
+![Task panel](assets/screenshot-tasks.png)
 ## Features
 
 | Module | Description |
