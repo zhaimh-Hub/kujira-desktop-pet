@@ -673,7 +673,16 @@
         const last = [...history].reverse().find((m) => m.role === 'assistant')
         showBubble(last ? last.content : '（这段没有答复）', '历史对话 · ' + (full.title || ''))
       }
-      row.append(g, btn)
+      const btnDel = document.createElement('button')
+      btnDel.textContent = '删'
+      btnDel.title = '删除这段对话'
+      btnDel.onclick = async (ev) => {
+        ev.stopPropagation()
+        if (!confirm('删除这段对话？不可恢复')) return
+        await fetch(API + '/convs/' + encodeURIComponent(c.id), { method: 'DELETE' }).catch(() => {})
+        openHistory()
+      }
+      row.append(g, btn, btnDel)
       box.append(row)
     }
     document.getElementById('histWrap').classList.add('show')

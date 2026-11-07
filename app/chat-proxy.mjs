@@ -17,7 +17,7 @@
 //
 // 数据都在 PetShell\data\ 下：notes.md / memory.json / reminders.json / tts\*.mp3
 import { createServer } from 'node:http'
-import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync, createReadStream, statSync, readdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync, createReadStream, statSync, readdirSync, unlinkSync } from 'node:fs'
 import { execFileSync, execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import os from 'node:os'
@@ -1124,6 +1124,13 @@ const server = createServer(async (req, res) => {
         } catch (e) { /* 坏文件跳过 */ }
       }
       return json(res, 200, { list })
+    }
+
+    if (req.method === 'DELETE' && url.pathname.startsWith('/convs/')) {
+      const id = decodeURIComponent(url.pathname.slice('/convs/'.length)).replace(/[^\w-]/g, '')
+      const f = path.join(DATA, 'conversations', id + '.json')
+      if (!existsSync(f)) return json(res, 404, { error: '没有这段对话' })
+      try { unlinkSync(f); return json(res, 200, { ok: true, id }) } catch (e) { return json(res, 500, { error: e.message }) }
     }
 
     if (req.method === 'GET' && url.pathname.startsWith('/convs/')) {
