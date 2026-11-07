@@ -1,0 +1,14 @@
+{
+  "name": "kujira-desktop-pet",
+  "version": "0.1.0",
+  "description": "基于 livliv-player 的透明桌面宠物 + 本地 AI 助手（Electron）",
+  "main": "app/main.js",
+  "scripts": {
+    "start": "electron .",
+    "postinstall": "electron --version"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^40.0.0"
+  }
+}

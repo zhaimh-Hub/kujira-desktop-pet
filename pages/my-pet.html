@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Pet</title>
+<link rel="icon" href="data:,">
+<!--
+  一个最小可用的桌宠页面：整页透明，只画一个 LivLiv 角色。
+  地址：http://localhost:8080/example/my-pet.html
+  可选参数：?char=s01   换角色（characters/ 下的文件夹名）
+            ?zoom=1.3   放大（1 = 整只刚好装进窗口，默认）
+            ?y=0.1      上下移动（占画面高度的比例，正数向上）
+            ?head=1     只框住头部（像头像/聊天气泡）
+-->
+<style>
+  /* 透明的关键：html / body / canvas 都不设背景色，WebGL 的清屏色本来就是 (0,0,0,0) */
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden }
+  canvas { display: block; width: 100vw; height: 100vh; background: transparent;
+           touch-action: none; user-select: none; -webkit-user-select: none; cursor: default }
+  /* 出错时才出现的一行小字，平时完全看不到 */
+  #note { position: fixed; left: 0; right: 0; bottom: 6px; margin: 0; padding: 0 8px; text-align: center;
+          font: 12px/1.5 system-ui, sans-serif; color: #fff; text-shadow: 0 0 4px #000, 0 0 2px #000;
+          opacity: 0; transition: opacity .2s; pointer-events: none }
+  #note.show { opacity: .9 }
+  /* 悬停才出现的关闭按钮：在 Electron 壳里退出桌宠（Ctrl+Alt+Q 同效） */
+  #close { position: fixed; right: 6px; top: 6px; z-index: 3; width: 20px; height: 20px; padding: 0;
+           border-radius: 50%; cursor: pointer; border: 1px solid #ffffff2e; background: #0b1524cc;
+           color: #dce8ff; font: 13px/1 system-ui, sans-serif; opacity: 0; transition: opacity .15s }
+  body:hover #close { opacity: .55 }
+  #close:hover { opacity: 1; background: #b93b3be6; border-color: #ffffff55 }
+</style>
+<canvas id="stage"></canvas>
+<p id="note" role="status"></p>
+<button id="close" title="关闭桌宠（Ctrl+Alt+Q）">×</button>
+
+<script type="module">
+  import { Player } from '../dist/index.js'
+
+  const q = new URLSearchParams(location.search)
+  // 想固定成某个角色，就改这里；URL 上的 ?char=xxx 会临时盖过它
+  const DEFAULT_CHAR = 'p03'                 // p03 = Pen（企鹅）；全部可选值见 characters/index.json
+  const id = q.get('char') || DEFAULT_CHAR
+
+  const note = document.getElementById('note')
+  const say = (text, keep) => {
+    note.textContent = text
+    note.classList.add('show')
+    clearTimeout(say.timer)
+    if (!keep) say.timer = setTimeout(() => note.classList.remove('show'), 3000)
+  }
+
+  async function main() {
+    if (!Player.isSupported()) return say('这个浏览器没有 WebGL2，画不出角色', true)
+
+    const player = new Player(document.getElementById('stage'), {
+      idle: true,              // 自带呼吸、眨眼、摇摆、看鼠标
+      followPointer: 'page',   // 鼠标在窗口任意位置它都会看过去；只想在画布内跟随就写 'canvas'
+      maxPixelRatio: 2,
+    })
+    window.player = player    // 控制台里可以直接试：player.act('nod')
+    player.onContextLost = () => say('显卡上下文丢失了，刷新页面即可', true)
+
+    // 构图：?zoom= / ?y= / ?head=1
+    if (q.has('zoom')) player.view.zoom = Number(q.get('zoom'))
+    if (q.has('y')) player.view.y = Number(q.get('y'))
+    if (q.get('head') === '1') player.view.head = true
+
+    // 先读 .livliv 包（一个请求），失败再退回同名文件夹（逐张图）
+    async function load(source) {
+      try {
+        return await player.load(source)
+      } catch (e) {
+        if (typeof source === 'string' && source.endsWith('.livliv')) {
+          return player.load(source.replace(/\.livliv$/, '/'))
+        }
+        throw e
+      }
+    }
+
+    const info = await load(`../characters/${id}.livliv`).catch((e) => {
+      say(`加载失败：${id} —— ${e.message}`, true)   // 角色名写错 / 静态服务器没开
+      throw e
+    })
+    console.log(`LivLiv: ${info.name} (${id}) · ${info.format} v${info.version}`)
+
+    // 交互：单击换下一个表情，双击跳一下
+    const canvas = player.canvas
+    let i = -1
+    canvas.addEventListener('click', () => {
+      i = i + 1 < info.expressions.length ? i + 1 : -1
+      player.setExpression(info.expressions[i]?.id ?? null)
+    })
+    canvas.addEventListener('dblclick', () => player.act('hop'))
+
+    // 关闭入口：✕ 在壳里退出桌宠；浏览器里就只是把提示清掉
+    document.getElementById('close').addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (window.pet?.quit) window.pet.quit()
+      else say('', false)
+    })
+    addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { note.textContent = ''; note.classList.remove('show') }
+    })
+  }
+
+  main().catch((e) => {
+    if (!note.classList.contains('show')) say(`出错了：${e.message}`, true)   // 别盖掉上面更具体的提示
+    console.error(e)
+  })
+</script>
+</html>

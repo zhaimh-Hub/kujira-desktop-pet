@@ -1,0 +1,24 @@
+{
+  "url": "http://127.0.0.1:8080/example/pet-chat.html?char=p01",
+  "width": 320,
+  "height": 440,
+  "alwaysOnTop": true,
+  "serveDir": "../player",
+  "servePort": 8080,
+  "chatPort": 8787,
+  "startChatProxy": true,
+
+  "provider": "auto",
+  "deepseekKey": "",
+  "deepseekModel": "deepseek-chat",
+  "ollamaUrl": "http://127.0.0.1:11434",
+  "model": "qwen3.5:4b",
+  "visionModel": "qwen2.5vl:7b",
+  "embedModel": "bge-m3",
+  "maxToolRounds": 8,
+  "temperature": 0.7,
+  "maxTokens": 400,
+
+  "tts": { "engine": "edge", "voice": "zh-CN-XiaoyiNeural", "rate": "+8%", "pitch": "+10Hz" },
+  "wechatExe": "<WECHAT_EXE>"
+}

@@ -1,0 +1,17 @@
+node_modules/
+dist/
+out/
+build/
+*.log
+
+# 运行时数据（可能含个人内容）
+data/
+config.json
+
+# 本机产物
+*.exe
+tools/PetHotkey
+selftest.png
+*.tmp
+.DS_Store
+Thumbs.db

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>大肥鱼 · 桌宠卡片</title>
+<link rel="icon" href="data:,">
+<!--
+  卡片版桌宠页：给 Pennywise 这类「不透明浮窗」宿主用（窗口底色 #16171a）。
+  地址：http://127.0.0.1:8080/example/pet-card.html?char=p01
+  参数：?char=p01    角色（p01 大肥鱼 / p02 西瓜版 / s01 / v06 …）
+        ?zoom=0.85  角色放大缩小（1 = 整只刚好装进卡片，默认 1.06 稍微放大一点点）
+        ?y=-0.05    角色上下挪（占卡片高度的比例，正数向上）
+        ?dpr=1      渲染倍率上限（默认 2，小窗其实 1 就够）
+  交互：单击换表情、Shift+单击戳一下头发、双击跳一下
+-->
+<style>
+  :root { --edge: #ffffff14; --ink: #dfe7f5 }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #16171a;                    /* 和 Pennywise 窗口底色一致，看不出接缝 */
+    color: var(--ink); font: 13px/1.5 system-ui, "Microsoft YaHei", sans-serif;
+    user-select: none; -webkit-user-select: none;
+  }
+  /* 卡片本体：深海渐变 + 1px 描边 + 圆角，窗户外框是方的，所以会像一张浮起来的卡 */
+  .card {
+    position: relative; height: 100%; overflow: hidden; border-radius: 14px;
+    background:
+      radial-gradient(120% 75% at 50% -5%, #1f5686 0%, #143253 42%, #0d1c2e 74%, #0a1420 100%);
+    box-shadow: inset 0 0 0 1px var(--edge), inset 0 -70px 90px -50px #000;
+  }
+  #bubbles, #stage { position: absolute; inset: 0; width: 100%; height: 100%; display: block }
+  /* 底部名牌 */
+  .plate {
+    position: absolute; left: 12px; bottom: 10px; display: flex; align-items: center; gap: 8px;
+    padding: 5px 13px 5px 10px; border-radius: 999px; z-index: 2;
+    background: #0a1220cc; border: 1px solid var(--edge); backdrop-filter: blur(8px);
+    font-size: 12px; letter-spacing: .02em;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #57e08a; box-shadow: 0 0 9px #57e08a }
+  .plate b { font-weight: 600 }
+  .plate span { opacity: .45; font-size: 11px }
+  /* 右下角操作提示：第一次点过之后淡出 */
+  .hint {
+    position: absolute; right: 13px; bottom: 13px; z-index: 2; font-size: 11px;
+    opacity: 0; transition: opacity .5s; pointer-events: none; text-shadow: 0 1px 3px #000a;
+  }
+  .hint.show { opacity: .55 }
+  /* 顶部的状态行：换成 loading 文案，出错时变红 */
+  .top {
+    position: absolute; left: 12px; top: 10px; z-index: 2; font-size: 11px; opacity: .5;
+    display: flex; align-items: center; gap: 6px; pointer-events: none;
+  }
+  .top.err { opacity: .95; color: #ff8d8d }
+</style>
+
+<div class="card">
+  <canvas id="bubbles"></canvas>
+  <canvas id="stage"></canvas>
+  <div class="top" id="status"><span>准备好啦</span></div>
+  <div class="plate"><i class="dot"></i><b id="name">—</b><span id="cid"></span></div>
+  <div class="hint" id="hint">单击换表情 · Shift+单击戳头发 · 双击跳一下</div>
+</div>
+
+<script type="module">
+  import { Player } from '../dist/index.js'
+
+  const q = new URLSearchParams(location.search)
+  const id = q.get('char') || 'p01'          // p01 = Kujira 大肥鱼；p02 = 西瓜版
+  const dpr = Number(q.get('dpr') ?? 2) || 2
+
+  const status = document.getElementById('status')
+  const hint = document.getElementById('hint')
+  const nameEl = document.getElementById('name')
+  const cidEl = document.getElementById('cid')
+  const say = (text, isErr) => { status.firstElementChild.textContent = text; status.classList.toggle('err', !!isErr) }
+
+  /* ---------- 背景气泡：很淡，别抢角色 ---------- */
+  const bc = document.getElementById('bubbles'), g = bc.getContext('2d')
+  const bubbles = Array.from({ length: 16 }, () => ({
+    x: Math.random(), y: Math.random(), r: 0.8 + Math.random() * 3.2,
+    v: 0.01 + Math.random() * 0.03, ph: Math.random() * 6.28, a: 0.04 + Math.random() * 0.10,
+  }))
+  let BW = 0, BH = 0
+  const fit = () => {
+    const d = Math.min(devicePixelRatio || 1, 2)
+    BW = bc.width = Math.round(bc.clientWidth * d)
+    BH = bc.height = Math.round(bc.clientHeight * d)
+  }
+  fit(); addEventListener('resize', fit)
+  let last = performance.now()
+  const tickBubbles = (now) => {
+    requestAnimationFrame(tickBubbles)
+    const dt = Math.min((now - last) / 1000, 0.1); last = now
+    if (document.hidden) return
+    const d = BW / Math.max(1, bc.clientWidth)
+    g.clearRect(0, 0, BW, BH)
+    for (const b of bubbles) {
+      b.y -= b.v * dt; b.ph += dt * 1.2
+      if (b.y < -0.05) { b.y = 1.05; b.x = Math.random() }
+      const x = (b.x + Math.sin(b.ph) * 0.004) * BW, y = b.y * BH, r = b.r * d
+      g.beginPath(); g.arc(x, y, r, 0, 6.2832)
+      g.strokeStyle = `rgba(190,230,255,${b.a})`; g.lineWidth = Math.max(1, d * 0.6); g.stroke()
+    }
+  }
+  requestAnimationFrame(tickBubbles)
+
+  /* ---------- 角色 ---------- */
+  async function main() {
+    if (!Player.isSupported()) return say('这个浏览器没有 WebGL2', true)
+    const player = new Player(document.getElementById('stage'), { idle: true, followPointer: 'page', maxPixelRatio: Math.min(dpr, 2) })
+    window.player = player
+    player.onContextLost = () => say('显卡上下文丢失，刷新即可', true)
+
+    const load = async (src) => {
+      try { return await player.load(src) }
+      catch (e) {
+        if (typeof src === 'string' && src.endsWith('.livliv')) return player.load(src.replace(/\.livliv$/, '/'))
+        throw e
+      }
+    }
+    say('加载中…')
+    const info = await load(`../characters/${id}.livliv`)
+    nameEl.textContent = info.name
+    cidEl.textContent = id
+    say('在线')
+    console.log(`LivLiv card: ${info.name} (${id}) ${info.format} v${info.version}`)
+
+    // 卡片里角色默认略大一点（掐头去尾一点点）；?zoom= 可覆盖，?y= 可上下挪
+    player.view.zoom = Number(q.get('zoom') ?? 1.06) || 1.06
+    if (q.has('y')) player.view.y = Number(q.get('y')) || 0
+
+    /* ---------- 交互 ---------- */
+    const canvas = player.canvas
+    let i = -1, interacted = false
+    const touch = () => { if (!interacted) { interacted = true; hint.classList.add('show'); setTimeout(() => hint.classList.remove('show'), 6000) } }
+    addEventListener('pointermove', touch, { once: true })
+
+    canvas.addEventListener('click', (e) => {
+      const r = canvas.getBoundingClientRect()
+      if (e.shiftKey) {                       // Shift+单击：戳一下，头发会甩
+        const [mx, my] = player.canvasToModel(e.clientX - r.left, e.clientY - r.top)
+        if (!player.poke(mx, my, 1)) player.act('nod')
+        return
+      }
+      i = i + 1 < info.expressions.length ? i + 1 : -1   // 单击：轮换表情
+      player.setExpression(info.expressions[i]?.id ?? null)
+    })
+    canvas.addEventListener('dblclick', () => player.act('hop'))
+  }
+
+  main().catch((e) => {
+    say(`加载失败：${e.message}`, true)
+    console.error(e)
+  })
+</script>
+</html>

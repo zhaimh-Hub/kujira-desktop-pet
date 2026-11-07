@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>大肥鱼 · 任务面板</title>
+<link rel="icon" href="data:,">
+<!--
+  任务面板：读代理的 GET /tasks，可暂停/恢复/改间隔/删除。
+  地址：http://127.0.0.1:8080/example/pet-tasks.html
+  参数：?api=http://127.0.0.1:8787
+-->
+<style>
+  :root { --bg:#0e1522; --card:#141d2e; --line:#ffffff1f; --ink:#e8eefc; --dim:#93a2bd; --accent:#3b82f6 }
+  * { box-sizing: border-box }
+  body {
+    margin: 0; padding: 22px 20px 40px; background: radial-gradient(120% 80% at 50% -10%, #17324f 0%, #0e1522 55%, #0a0f18 100%);
+    color: var(--ink); font: 14px/1.6 system-ui, "Microsoft YaHei", sans-serif; min-height: 100vh;
+  }
+  h1 { font-size: 17px; margin: 0 0 4px; font-weight: 600 }
+  .sub { color: var(--dim); font-size: 12px; margin-bottom: 18px }
+  .bar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap }
+  button {
+    font: inherit; font-size: 12px; padding: 5px 11px; border-radius: 9px; cursor: pointer;
+    border: 1px solid var(--line); background: #ffffff12; color: var(--ink); transition: .15s;
+  }
+  button:hover { background: #ffffff20 }
+  button.primary { background: var(--accent); border-color: transparent }
+  button.danger:hover { background: #b93b3bdd; border-color: transparent }
+  button:disabled { opacity: .4; cursor: default }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 13px 15px; margin-bottom: 10px; display: flex; gap: 14px; align-items: center;
+    box-shadow: 0 6px 18px #0005;
+  }
+  .card.paused { opacity: .6 }
+  .grow { flex: 1; min-width: 0 }
+  .title { font-size: 14px; margin-bottom: 2px; word-break: break-word }
+  .meta { color: var(--dim); font-size: 11.5px }
+  .task-meta { color: var(--dim); font-size: 11.5px }
+  .pill { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; margin-left: 6px; vertical-align: 1px }
+  .pill.on { background: #1f7a4d33; color: #79e2ab; border: 1px solid #79e2ab44 }
+  .pill.off { background: #7a5a1f33; color: #ffcf7a; border: 1px solid #ffcf7a44 }
+  .actions { display: flex; gap: 6px; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end }
+  .empty { color: var(--dim); padding: 26px 0; text-align: center; border: 1px dashed var(--line); border-radius: 14px }
+  input[type=number] { width: 62px; font: inherit; font-size: 12px; padding: 4px 7px; border-radius: 8px; border: 1px solid var(--line); background: #ffffff0d; color: var(--ink) }
+  .err { color: #ffb4b4; font-size: 12.5px }
+  .foot { color: var(--dim); font-size: 11.5px; margin-top: 18px }
+</style>
+
+<h1>大肥鱼 · 任务面板</h1>
+<div class="sub">数据来自 <code id="api"></code>（桌宠在跑的时候才有数据）</div>
+
+<div class="bar">
+  <button class="primary" id="refresh">刷新</button>
+  <label class="meta"><input type="checkbox" id="auto" checked> 每 3 秒自动刷新</label>
+  <span class="meta" id="updated"></span>
+</div>
+
+<div id="list"></div>
+<div class="foot">想加新任务就跟桌宠说：「每 30 分钟提醒我看一眼论文」。</div>
+
+<script>
+  const API = (new URLSearchParams(location.search).get('api') || 'http://127.0.0.1:8787').replace(/\/$/, '')
+  document.getElementById('api').textContent = API
+  const listEl = document.getElementById('list')
+  const updatedEl = document.getElementById('updated')
+  const autoEl = document.getElementById('auto')
+
+  const fmtEvery = (ms) => {
+    const m = Math.round(ms / 60000)
+    return m >= 60 ? `${(m / 60).toFixed(m % 60 ? 1 : 0)} 小时` : `${m} 分钟`
+  }
+  const fmtTime = (ms) => new Date(ms).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+
+  async function act(id, action, extra = {}) {
+    await fetch(`${API}/task`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id, action, ...extra }),
+    }).catch(() => {})
+    load()
+  }
+
+  function card(t) {
+    const el = document.createElement('div')
+    el.className = 'card' + (t.paused ? ' paused' : '')
+
+    const grow = document.createElement('div')
+    grow.className = 'grow'
+    const title = document.createElement('div')
+    title.className = 'title'
+    title.textContent = t.text
+    title.insertAdjacentHTML('beforeend',
+      `<span class="pill ${t.paused ? 'off' : 'on'}">${t.paused ? '已暂停' : '进行中'}</span>`)
+    const meta = document.createElement('div')
+    meta.className = 'task-meta'
+    const left = t.left === 0 ? '一直重复' : `还剩 ${t.left} 次`
+    meta.textContent = `每 ${fmtEvery(t.every)} · ${left} · 下次 ${fmtTime(t.next)}`
+    grow.append(title, meta)
+
+    const actions = document.createElement('div')
+    actions.className = 'actions'
+
+    const pause = document.createElement('button')
+    pause.textContent = t.paused ? '恢复' : '暂停'
+    pause.onclick = () => act(t.id, t.paused ? 'resume' : 'pause')
+
+    const num = document.createElement('input')
+    num.type = 'number'
+    num.min = '1'; num.max = '720'
+    num.value = String(Math.round(t.every / 60000))
+    const every = document.createElement('button')
+    every.textContent = '改间隔'
+    every.onclick = () => {
+      const minutes = Number(num.value)
+      if (minutes >= 1 && minutes <= 720) act(t.id, 'every', { minutes })
+    }
+
+    const del = document.createElement('button')
+    del.className = 'danger'
+    del.textContent = '删除'
+    del.onclick = () => act(t.id, 'delete')
+
+    actions.append(pause, num, every, del)
+    el.append(grow, actions)
+    return el
+  }
+
+  async function load() {
+    try {
+      const r = await fetch(`${API}/tasks`, { cache: 'no-store' })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const data = await r.json()
+      listEl.replaceChildren()
+      if (!data.tasks?.length && !data.reminders?.length) {
+        const empty = document.createElement('div')
+        empty.className = 'empty'
+        empty.textContent = '现在没有任何任务。对桌宠说「每 30 分钟提醒我看论文」就能建一个。'
+        listEl.append(empty)
+      } else {
+        for (const t of data.tasks || []) listEl.append(card(t))
+        for (const r2 of data.reminders || []) {
+          const el = document.createElement('div')
+          el.className = 'card'
+          el.innerHTML = `<div class="grow"><div class="title"></div><div class="task-meta"></div></div>`
+          el.querySelector('.title').textContent = r2.text
+          el.querySelector('.meta').textContent = `一次性提醒 · 到点 ${fmtTime(r2.due)}`
+          listEl.append(el)
+        }
+      }
+      updatedEl.textContent = `已更新 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
+    } catch (e) {
+      listEl.replaceChildren()
+      const err = document.createElement('div')
+      err.className = 'err'
+      err.textContent = `连不上桌宠：${e.message}　—— 先按 Ctrl+Alt+空格 把它叫出来（8080/8787 在它进程里）`
+      listEl.append(err)
+    }
+  }
+
+  document.getElementById('refresh').onclick = load
+  setInterval(() => { if (autoEl.checked) load() }, 3000)
+  load()
+</script>
+</html>

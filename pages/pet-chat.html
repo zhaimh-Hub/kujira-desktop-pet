@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>大肥鱼 · 会干活的桌宠</title>
+<link rel="icon" href="data:,">
+<!--
+  会说话、会干活、有情绪的桌宠页。
+  地址：http://127.0.0.1:8080/example/pet-chat.html?char=p01
+  依赖壳内代理（127.0.0.1:8787）：/chat 带工具调用 + /tts 真人音色 + /reminders 提醒
+
+  参数：
+    ?char=p01        角色
+    ?tts=edge|sapi   语音引擎，默认 edge（真人音色），失败自动退回 sapi
+    ?voice=…         edge-tts 音色，默认 zh-CN-XiaoyiNeural（也可 zh-CN-XiaoxiaoNeural）
+    ?idle=15         多久没人理就自己嘀咕一句（分钟，0 = 关）
+    ?api=…           代理地址
+    ?provider=…      临时指定后端
+    ?zoom=0.96 ?y=… ?dpr=…
+
+  交互：双击我 → 展开/收起输入条；单击（已展开）→ 聚焦；Esc → 收气泡；
+        Shift+单击 → 戳一下；悬停右上角 × → 退出（壳里）/ 收气泡（浏览器里）
+-->
+<style>
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; background: transparent;
+    font: 12px/1.5 system-ui, "Microsoft YaHei", sans-serif; color: #eaf1ff;
+    user-select: none; -webkit-user-select: none;
+  }
+  #stage { position: absolute; inset: 0; width: 100%; height: 100%; display: block }
+
+  /* 气泡 */
+  #bubble {
+    position: absolute; left: 8px; right: 8px; top: 8px; z-index: 3; max-height: calc(100% - 96px); overflow: auto;
+    max-height: 48%; overflow-y: auto; overscroll-behavior: contain;
+    padding: 8px 11px; border-radius: 13px;
+    background: #0b1524f2; border: 1px solid #ffffff24;
+    box-shadow: 0 6px 22px #0009; backdrop-filter: blur(6px);
+    font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+    opacity: 0; transform: translateY(-4px); transition: opacity .18s, transform .18s;
+    pointer-events: none;
+  }
+  #bubble.show { opacity: 1; transform: none; pointer-events: auto; cursor: grab; touch-action: none }
+  #bubble:active { cursor: grabbing }
+  #bubble.err { border-color: #ff8d8d66; color: #ffc9c9 }
+  #bubble .meta { display: block; margin-top: 4px; font-size: 10px; opacity: .45 }
+  #bubble .act { display: block; margin-top: 3px; font-size: 10.5px; color: #8fd0ff; opacity: .85 }
+  #bubble .steps { display: block; margin-top: 3px; font-size: 10.5px; color: #ffd479; opacity: .9 }
+  #bubble .confirm { display: flex; gap: 6px; margin-top: 7px }
+  #bubble .confirm button { flex: 1; padding: 4px 0; border-radius: 8px; border: 1px solid #ffffff30; background: #ffffff14; color: inherit; font: inherit; font-size: 11px; cursor: pointer }
+  #bubble .confirm button.yes { background: #3b82f680; border-color: #3b82f6 }
+  #bubble .confirm button:active { transform: scale(.97) }
+  #bubble.thinking { opacity: 1; transform: none }
+  #bubble.thinking::after { content: '…'; animation: dots 1.2s steps(4) infinite }
+  @keyframes dots { 0% { opacity: .2 } 50% { opacity: 1 } 100% { opacity: .2 } }
+
+  /* 输入条：默认收起，双击我或点 💬 才出现 */
+  #bar {
+    position: absolute; left: 8px; right: 44px; bottom: 8px; z-index: 3;
+    display: flex; gap: 6px; align-items: center;
+    opacity: 0; transform: translateY(6px); transition: opacity .18s, transform .18s;
+    pointer-events: none;
+  }
+  #bar.open { opacity: 1; transform: none; pointer-events: auto }
+  #say {
+    flex: 1; min-width: 0; height: 30px; padding: 0 11px; border-radius: 999px;
+    border: 1px solid #ffffff26; background: #0a1220d9; color: inherit; font: inherit;
+    outline: none; backdrop-filter: blur(6px);
+  }
+  #say::placeholder { color: #ffffff59 }
+  #say:focus { border-color: #6fb6ff88; box-shadow: 0 0 0 3px #6fb6ff22 }
+  #send {
+    width: 30px; height: 30px; flex: 0 0 30px; border: 0; border-radius: 50%;
+    background: #3b82f6; color: #fff; font-size: 15px; line-height: 1; cursor: pointer;
+  }
+  #send:disabled { background: #ffffff26; cursor: default }
+
+  /* 收起状态下的小按钮 */
+  #chatico, #mute {
+    position: absolute; bottom: 6px; z-index: 20;
+    width: 30px; height: 30px; padding: 0; border-radius: 50%; cursor: pointer;
+    border: 1.5px solid #ffffff73; background: #0b1524f2; color: #dce8ff;
+    font-size: 15px; line-height: 1; opacity: .95;
+    box-shadow: 0 2px 8px #000a, 0 0 0 1px #0006 inset;
+    transition: transform .12s, opacity .12s, background .12s;
+  }
+  #chatico { right: 6px; bottom: 52px }
+  #mute { right: 6px; bottom: 88px }
+  #mute.off { background: #3a1220f2; border-color: #ff7b7b88; opacity: 1 }
+  /* 输入框展开时按钮仍然显示（原来这里会 opacity:0，导致看不到） */
+  #chatico:hover, #mute:hover { opacity: 1; transform: scale(1.08); background: #16233af2 }  #chatico:hover, #mute:hover { opacity: 1 }
+  #send.busy { border-radius: 6px; background: #b93b3b; border-color: transparent; font-size: 0 }
+  #send.busy::after { content: '■'; font-size: 11px }
+
+  /* 右上角关闭 */
+  #close {
+    position: absolute; right: 6px; top: 6px; z-index: 5;
+    width: 20px; height: 20px; padding: 0; border-radius: 50%; cursor: pointer;
+    border: 1px solid #ffffff2e; background: #0b1524cc; color: #dce8ff;
+    font: 13px/1 system-ui, sans-serif; opacity: 0; transition: opacity .15s;
+  }
+  body:hover #close { opacity: .55 }
+  #close:hover { opacity: 1; background: #b93b3be6; border-color: #ffffff55 }
+
+  #tip { position: absolute; left: 8px; right: 8px; bottom: 40px; z-index: 2;
+         font-size: 10.5px; opacity: .38; text-align: center; pointer-events: none }
+  body.speaking #tip { opacity: 0 }
+  #ask {
+    position: absolute; left: 8px; right: 8px; bottom: 40px; z-index: 9; display: none;
+    padding: 9px 11px; border-radius: 12px; background: #101b2eee; border: 1px solid #ffd47966;
+    color: #fff; font: 12px/1.5 system-ui, "Microsoft YaHei", sans-serif; pointer-events: auto;
+    box-shadow: 0 8px 24px #0008;
+  }
+  #ask.show { display: block }
+  #ask .q { margin-bottom: 7px; word-break: break-word }
+  #ask .btns { display: flex; gap: 7px }
+  #ask button { flex: 1; padding: 6px 0; border-radius: 9px; border: 1px solid #ffffff33; background: #ffffff18; color: #fff; font: inherit; cursor: pointer }
+  #ask button#askYes { background: #3b82f6e6; border-color: transparent }</style>
+
+<canvas id="stage"></canvas>
+<div id="bubble"></div>
+<button id="close" title="关闭桌宠（Ctrl+Alt+Q）；Esc 只收气泡">×</button>
+<div id="tip">双击我说话 · 我能帮你开应用、记笔记、设提醒</div>
+<div id="bar">
+  <input id="say" maxlength="200" placeholder="让我帮你做点什么…" autocomplete="off" spellcheck="false">
+  <button id="send" title="发送（回车）">↑</button>
+</div>
+<div id="ask"><div class="q"></div><div class="btns"><button id="askYes">确定</button><button id="askNo">算了</button></div></div>
+<button id="mute" title="语音开关（记住选择）">🔊</button>
+<button id="chatico" title="展开输入（或双击我）">💬</button>
+
+<script type="module">
+  import { Player } from '../dist/index.js'
+
+  let history = []   // 对话历史（别用 window.history，那是浏览器对象）
+
+  const q = new URLSearchParams(location.search)
+  const charId = q.get('char') || 'p01'
+  const API = (q.get('api') || 'http://127.0.0.1:8787').replace(/\/$/, '')
+  const providerParam = q.get('provider') || undefined
+  const ttsMode = (q.get('tts') || 'edge').toLowerCase()       // edge | sapi
+  const voice = q.get('voice') || 'zh-CN-XiaoyiNeural'
+  const idleMinutes = Number(q.get('idle') ?? 15)              // 0 = 关
+  const dpr = Number(q.get('dpr') ?? 2) || 2
+
+  const bubble = document.getElementById('bubble')
+  const say = document.getElementById('say')
+  const bar = document.getElementById('bar')
+  const chatico = document.getElementById('chatico')
+  const sendBtn = document.getElementById('send')
+  const tip = document.getElementById('tip')
+
+  let thinking = false
+  let lastActivity = Date.now()
+
+  const showBubble = (text, meta, act, isErr) => {
+    bubble.className = 'show' + (isErr ? ' err' : '')
+    bubble.textContent = text
+    if (act) {
+      const a = document.createElement('span')
+      a.className = 'act'
+      a.textContent = act
+      bubble.append(a)
+    }
+    if (meta) {
+      const s = document.createElement('span')
+      s.className = 'meta'
+      s.textContent = meta
+      bubble.append(s)
+    }
+    bubble.scrollTop = 0
+  }
+  const showThinking = () => { thinking = true; bubble.className = 'show thinking'; bubble.textContent = '让我想想'; sendBtn.disabled = true }
+  const stopThinking = () => { thinking = false; sendBtn.disabled = false }
+  const hideBubble = () => { bubble.className = ''; bubble.textContent = '' }
+
+  const setBar = (open) => {
+    bar.classList.toggle('open', open)
+    if (open) say.focus()
+    else say.blur()
+  }
+
+  /* --------------------------------------- 语音：edge 真人音色 + 真实振幅口型 */
+  const synth = 'speechSynthesis' in window ? window.speechSynthesis : null
+  let audioCtx = null, analyser = null, pcm = null, playing = false
+  let synthSpeaking = false
+  let mouthKick = 0
+
+  function ensureAudio() {
+    if (audioCtx) return audioCtx
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' })
+    analyser = audioCtx.createAnalyser()
+    analyser.fftSize = 1024
+    analyser.smoothingTimeConstant = 0.4
+    pcm = new Uint8Array(analyser.fftSize)
+    return audioCtx
+  }
+
+  async function speakEdge(text) {
+    const res = await fetch(`${API}/tts?text=${encodeURIComponent(text)}`)
+    if (!res.ok) throw new Error(`tts HTTP ${res.status}`)
+    const buf = await res.arrayBuffer()
+    if (buf.byteLength < 1000) throw new Error('tts 音频太小')
+    ensureAudio().resume()
+    const url = URL.createObjectURL(new Blob([buf], { type: 'audio/mpeg' }))
+    const audio = new Audio(url)
+    const src = audioCtx.createMediaElementSource(audio)
+    src.connect(analyser)
+    analyser.connect(audioCtx.destination)
+    audio.onended = () => { playing = false; document.body.classList.remove('speaking'); URL.revokeObjectURL(url) }
+    await audio.play()
+    playing = true
+    document.body.classList.add('speaking')
+  }
+
+  function speakSapi(text) {
+    if (!synth) return
+    try { synth.cancel() } catch { /* ignore */ }
+    const u = new SpeechSynthesisUtterance(text)
+    const vs = synth.getVoices() || []
+    u.voice = vs.find((v) => /^zh[-_]CN/i.test(v.lang) && /Xiaoxiao|Yaoyao|Huihui|Female|女/i.test(v.name)) || vs.find((v) => /^zh/i.test(v.lang)) || null
+    u.lang = 'zh-CN'; u.rate = 1.05; u.pitch = 1.15
+    u.onstart = () => { synthSpeaking = true; document.body.classList.add('speaking') }
+    u.onend = () => { synthSpeaking = false; document.body.classList.remove('speaking') }
+    u.onerror = () => { synthSpeaking = false; document.body.classList.remove('speaking') }
+    u.onboundary = () => { mouthKick = 1 }
+    synth.speak(u)
+  }
+
+  let ttsDown = ttsMode === 'sapi'   // edge 失败一次就整体降级，别反复等
+  // 语音总开关：默认开；`?tts=off` 或上次点了 🔇 就完全不出声
+  let speakOn = ttsMode !== 'off' && (localStorage.getItem('pet:speak') ?? '1') === '1'
+  const muteBtn = document.getElementById('mute')
+  const paintMute = () => {
+    muteBtn.textContent = speakOn ? '🔊' : '🔇'
+    muteBtn.classList.toggle('off', !speakOn)
+    muteBtn.title = speakOn ? '语音：开（点一下静音）' : '语音：关（点一下打开）'
+  }
+  paintMute()
+  muteBtn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    speakOn = !speakOn
+    try { localStorage.setItem('pet:speak', speakOn ? '1' : '0') } catch { /* ignore */ }
+    if (!speakOn) { try { synth?.cancel() } catch { /* ignore */ } playing = false; synthSpeaking = false; document.body.classList.remove('speaking') }
+    paintMute()
+  })
+
+    const askEl = document.getElementById('ask')
+    const askQ = askEl.querySelector('.q')
+    const askYes = document.getElementById('askYes')
+    const askNo = document.getElementById('askNo')
+    let askPending = null
+    const hideAsk = () => { askEl.classList.remove('show'); askPending = null }
+    askYes.onclick = (e) => { e.stopPropagation(); const p = askPending; hideAsk(); if (p) send(p.text, { confirm: true }) }
+    askNo.onclick = (e) => { e.stopPropagation(); hideAsk(); showBubble('好，那我不发了。', '取消') }
+  async function speak(text) {
+    try { return await speakInner(text) } catch (e) { console.warn('TTS 出错（已忽略）：', e) }
+  }
+  async function speakInner(text) {
+    if (!text || !speakOn) return          // 静音模式直接返回，不出声也不合成
+    if (!ttsDown) {
+      try { await speakEdge(text); return }
+      catch (e) { ttsDown = true; console.warn('edge-tts 不可用，退回系统语音：', e.message) }
+    }
+    speakSapi(text)
+  }
+
+  /* ------------------------------------------------------------------ 角色 */
+  async function main() {
+    if (!Player.isSupported()) return showBubble('这个浏览器没有 WebGL2', null, null, true)
+
+    const player = new Player(document.getElementById('stage'), { idle: true, followPointer: 'page', maxPixelRatio: Math.min(dpr, 2) })
+    window.player = player
+    player.view.zoom = Number(q.get('zoom') ?? 0.96) || 0.96
+    if (q.has('y')) player.view.y = Number(q.get('y')) || 0
+
+    const load = async (src) => {
+      try { return await player.load(src) }
+      catch (e) {
+        if (typeof src === 'string' && src.endsWith('.livliv')) return player.load(src.replace(/\.livliv$/, '/'))
+        throw e
+      }
+    }
+    const info = await load(`../characters/${charId}.livliv`)
+    console.log(`LivLiv chat: ${info.name} (${charId}) ${info.format} v${info.version}`)
+
+    /* 口型 */
+    const t0 = performance.now()
+    const lipLoop = (now) => {
+      requestAnimationFrame(lipLoop)
+      if (!player.model) return
+
+      if (playing && analyser) {
+        analyser.getByteTimeDomainData(pcm)
+        let sum = 0
+        for (let i = 0; i < pcm.length; i++) { const v = (pcm[i] - 128) / 128; sum += v * v }
+        const rms = Math.sqrt(sum / pcm.length)
+        player.params.mouthOpen = Math.min(1, rms * 6.5)
+        return
+      }
+      if (synthSpeaking) {
+        const t = (now - t0) / 1000
+        mouthKick = Math.max(0, mouthKick - 0.06)
+        const wave = 0.35 + 0.55 * Math.abs(Math.sin(t * 9.3)) * (0.6 + 0.4 * Math.sin(t * 2.7))
+        player.params.mouthOpen = Math.min(1, wave * 0.55 + mouthKick * 0.45)
+        return
+      }
+      if (player.params.mouthOpen !== 0) player.params.mouthOpen = Math.max(0, player.params.mouthOpen - 0.08)
+    }
+    requestAnimationFrame(lipLoop)
+
+    /* 情绪 → 表情 */
+    const EXPR = { smile: 'smile', shy: 'shy', angry: 'angry', sad: 'sad', surprised: 'surprised' }
+    let exprTimer = null
+    const showEmotion = (e) => {
+      const id = EXPR[e]
+      clearTimeout(exprTimer)
+      if (!id) { player.setExpression(null); return }
+      player.setExpression(id)
+      exprTimer = setTimeout(() => player.setExpression(null), 3200)
+    }
+
+    const react = (text, meta, act, emotion, confirm) => {
+      showBubble(text, meta, act)
+      showEmotion(emotion)
+      speak(text)
+      player.act('nod')
+      if (confirm) askConfirm(confirm)
+    }
+
+    /* 危险操作（锁屏/关进程）的二次确认：气泡里亮出「确定 / 取消」 */
+    let lastUserText = ''
+    let steps = []   // 本轮已完成的工具步骤
+    let gotReply = false   // 本轮是否已经拿到答复（用来区分「真没连上」和「后续处理出错」）
+    let ctrl = null        // 本轮请求的 AbortController（用于「停止」）
+    const setBusy = (on) => { sendBtn.classList.toggle('busy', on); sendBtn.title = on ? '停止（点一下取消正在做的事）' : '发送（回车）' }
+    const askConfirm = (c) => {
+      askQ.textContent = '要我' + (c.label || '执行') + ' 吗？'
+      askPending = { text: lastUserText }
+      askEl.classList.add('show')
+      speak('要我' + (c.label || '执行') + '吗')
+    }
+    function showSteps() {
+      if (!steps.length) return
+      let el = bubble.querySelector('.steps')
+      if (!el) { el = document.createElement('span'); el.className = 'steps'; bubble.append(el) }
+      el.textContent = '🔧 ' + steps.join(' · ')
+    }
+    async function send(overrideText, opts = {}) {
+      const text = (overrideText || say.value).trim()
+      if (!text || thinking) return
+      say.value = ''
+      tip.textContent = ''
+      lastActivity = Date.now()
+      gotReply = false
+      if (ctrl) ctrl.abort()
+      ctrl = new AbortController()
+      setBusy(true)
+      if (/微信|发送|发消息|发一条/.test(text) && window.pet?.hideFor) window.pet.hideFor(20000)
+      if (!opts.confirm && !opts._retried) { history.push({ role: 'user', content: text }); lastUserText = text }
+      steps.length = 0
+      showThinking()
+
+      const payload = { messages: history.slice(-8) }
+      if (opts.confirm) { payload.confirm = true; payload.messages = [...history.slice(-6), { role: 'user', content: lastUserText }] }
+      if (providerParam) payload.provider = providerParam
+      try {
+        // 走 SSE：边干边报进度（多步任务时能看到 tool 一个个跑）
+        const res = await fetch(`${API}/chat?stream=1`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.error || `HTTP ${res.status}`)
+        }
+        let data = null
+        let buf = ''
+        const reader = res.body.getReader()
+        const dec = new TextDecoder()
+        for (;;) {
+          const { value, done } = await reader.read()
+          if (done) break
+          buf += dec.decode(value, { stream: true })
+          let cut
+          while ((cut = buf.indexOf('\n\n')) >= 0) {
+            const chunk = buf.slice(0, cut)
+            buf = buf.slice(cut + 2)
+            const line = chunk.split('\n').find((l) => l.startsWith('data: '))
+            if (!line) continue
+            let ev
+            try { ev = JSON.parse(line.slice(6)) } catch { continue }
+            if (ev.type === 'step' && ev.phase === 'done') {
+              steps.push(ev.summary || ev.name)
+              showSteps()
+            } else if (ev.type === 'final') {
+              data = ev
+            } else if (ev.type === 'error') {
+              throw new Error(ev.error || '代理报错')
+            }
+          }
+        }
+        stopThinking()
+        setBusy(false)
+        if (!data) throw new Error('流断了，没收到最终回复')
+        const reply = (data.reply || '').trim() || '（它没说话）'
+        history.push({ role: 'assistant', content: reply })
+        setBusy(false)
+        const act = data.tools?.length ? '🔧 ' + data.tools.map((t) => t.summary || t.name).join(' · ') : ''
+        window.pet?.focusSelf?.()   // 先让壳自己试一次
+        fetch(API + '/focuspet', { method: 'POST' }).catch(() => {})   // 再让 PowerShell 强前台抢一次
+        react(reply, `${data.provider} · ${data.model} · ${(data.ms / 1000).toFixed(1)}s`, act, data.emotion)
+      } catch (e) {
+        stopThinking()
+        if (!gotReply) showBubble(`代理没连上：${e.message}\n\n按 Ctrl+Alt+Q 退出后重新点「大肥鱼桌宠」。`, null, null, true)
+        console.error(e)
+      }
+          ctrl = null
+    }
+
+    /* 提醒轮询 */
+    setInterval(async () => {
+      if (document.hidden || thinking) return
+      try {
+        const r = await (await fetch(`${API}/reminders`)).json()
+        for (const item of r.due || []) react(`⏰ ${item.text}`, '提醒', '', 'surprised')
+      } catch { /* 代理没起就算了 */ }
+    }, 20000)
+
+    /* 没人理时自己嘀咕 */
+    const IDLE_LINES = [
+      '唔…你忙你的，我在这儿看着呢。',
+      '要不要歇会儿眼睛呀？',
+      '刚才那只猫又在你屏幕上走来走去了。',
+      '我可不可以…要一点点摸鱼时间？',
+      '桌面好干净呀，和你一样清爽。',
+      '有事情喊我，我耳朵很灵的。',
+    ]
+    if (idleMinutes > 0) {
+      setInterval(() => {
+        if (document.hidden || thinking || playing || synthSpeaking) return
+        if (Date.now() - lastActivity < idleMinutes * 60000) return
+        if (bubble.classList.contains('show')) return
+        lastActivity = Date.now()
+        // 闲置自语**只出文字、不朗读**，免得突然出声吓人
+        const line = IDLE_LINES[Math.floor(Math.random() * IDLE_LINES.length)]
+        showBubble(line, '闲置自语')
+        showEmotion('neutral')
+      }, 30000)
+    }
+
+    /* ------------------------------------------------------------- 交互 */
+    sendBtn.addEventListener('click', (e) => {
+  e.preventDefault(); e.stopPropagation()
+  if (ctrl) { ctrl.abort(); return }        // 正在干活 → 点它 = 停止
+  send()
+})
+    say.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); send() }
+      if (e.key === 'Escape') { e.preventDefault(); say.blur(); setBar(false); hideBubble() }
+    })
+    say.addEventListener('input', () => { lastActivity = Date.now() })
+    say.addEventListener('focus', () => { player.followPointer = false; lastActivity = Date.now() })
+    say.addEventListener('blur', () => { player.followPointer = 'page' })
+
+    // 双击宠物：展开/收起输入条
+    player.canvas.addEventListener('dblclick', () => { setBar(!bar.classList.contains('open')); if (tip.textContent) tip.textContent = '' })
+    // 单击：已展开就聚焦输入；Shift+单击戳一下
+    player.canvas.addEventListener('click', (e) => {
+      lastActivity = Date.now()
+      if (bar.classList.contains('open')) { say.focus(); return }
+      if (e.shiftKey) {
+        const r = player.canvas.getBoundingClientRect()
+        const [mx, my] = player.canvasToModel(e.clientX - r.left, e.clientY - r.top)
+        if (!player.poke(mx, my, 1)) player.act('nod')
+      }
+    })
+    chatico.addEventListener('click', (e) => { e.stopPropagation(); setBar(true) })
+
+    document.getElementById('close').addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (window.pet?.quit) window.pet.quit()
+      else { hideBubble(); setBar(false) }
+    })
+    addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && document.activeElement !== say) { hideBubble(); if (bar.classList.contains('open')) setBar(false) }
+      if (e.key === 'Enter' && !bar.classList.contains('open') && document.activeElement === document.body) { e.preventDefault(); setBar(true) }
+    })
+    addEventListener('focus', () => { if (bar.classList.contains('open')) say.focus() })
+
+    /* ------------------------------------------------------ 气泡可拖动 */
+    // 默认贴顶，会挡住脸；按住气泡拖到别处，位置记在 localStorage，下次还在原位。
+    const BUBBLE_KEY = 'pet:bubblePos'
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
+    const placeBubble = (x, y) => {
+      const w = bubble.offsetWidth || 200, h = bubble.offsetHeight || 60
+      const bx = clamp(x, 0, Math.max(0, innerWidth - w))
+      const by = clamp(y, 0, Math.max(0, innerHeight - h))
+      bubble.style.left = `${bx}px`
+      bubble.style.top = `${by}px`
+      bubble.style.right = 'auto'
+      bubble.style.bottom = 'auto'
+    }
+    try {
+      const saved = JSON.parse(localStorage.getItem(BUBBLE_KEY) || 'null')
+      if (saved) placeBubble(saved.x, saved.y)
+    } catch { /* 没存过就算了 */ }
+
+    let dragBubble = null
+    bubble.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return
+      const r = bubble.getBoundingClientRect()
+      dragBubble = { dx: e.clientX - r.left, dy: e.clientY - r.top, moved: false }
+      bubble.setPointerCapture(e.pointerId)
+      e.stopPropagation()
+    })
+    bubble.addEventListener('pointermove', (e) => {
+      if (!dragBubble) return
+      dragBubble.moved = true
+      placeBubble(e.clientX - dragBubble.dx, e.clientY - dragBubble.dy)
+      e.stopPropagation()
+    })
+    bubble.addEventListener('pointerup', (e) => {
+      if (!dragBubble) return
+      if (dragBubble.moved) {
+        try { localStorage.setItem(BUBBLE_KEY, JSON.stringify({ x: parseInt(bubble.style.left, 10) || 0, y: parseInt(bubble.style.top, 10) || 0 })) } catch { /* ignore */ }
+      }
+      dragBubble = null
+      e.stopPropagation()
+    })
+    // 双击气泡 = 归位到顶部
+    bubble.addEventListener('dblclick', (e) => {
+      e.stopPropagation()
+      try { localStorage.removeItem(BUBBLE_KEY) } catch { /* ignore */ }
+      bubble.style.left = '8px'
+      bubble.style.right = '8px'
+      bubble.style.top = '8px'
+    })
+
+    // 调试/自动化入口
+    window.petChat = {
+      ask: (text) => { say.value = text; setBar(true); return send() },
+      speak,
+      focusInput: () => setBar(true),
+      get busy() { return thinking },
+      get history() { return history.slice() },
+      get audio() { return { playing, ttsDown, hasAnalyser: !!analyser, speakOn } },
+      setSpeak: (on) => { speakOn = !!on; try { localStorage.setItem('pet:speak', speakOn ? '1' : '0') } catch {} paintMute() },
+      get steps() { return steps.slice() },
+      bubblePos: () => ({ x: parseInt(bubble.style.left, 10) || 0, y: parseInt(bubble.style.top, 10) || 0 }),
+    }
+    console.log(`TTS: ${ttsDown ? 'sapi' : 'edge'} / ${voice}；闲置自语 ${idleMinutes ? idleMinutes + ' 分钟' : '关'}`)
+  }
+
+  main().catch((e) => { showBubble(`加载失败：${e.message}`, null, null, true); console.error(e) })
+</script>
+</html>

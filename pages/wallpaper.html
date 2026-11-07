@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LivLiv · 大肥鱼 动态壁纸</title>
+<link rel="icon" href="data:,">
+<!--
+  动态壁纸页面：深海底色 + 气泡 + 缓慢游动的角色，铺满整屏。
+  地址：http://localhost:8080/example/wallpaper.html
+  参数：?char=p01   换角色（p01 = Kujira 大肥鱼，p02 = Kujira Q 西瓜版）
+        ?zoom=1.15 放大一点（1 = 整只刚好装进屏幕高度）
+        ?y=-0.05   上下挪（占屏高比例，正数向上）
+        ?dpr=1     渲染倍率上限（4K 屏想省电就写 1，默认 1.5）
+        ?bubbles=0 关掉气泡
+-->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #04070f }
+
+  /* 深海：上方透光，下方沉暗。壁纸整体偏暗，桌面图标才好认 */
+  #sea { position: fixed; inset: 0;
+         background:
+           radial-gradient(1400px 900px at 50% -15%, #2f7dbb 0%, #12406c 32%, #08203a 62%, #04070f 100%),
+           linear-gradient(#050d18, #02060c) }
+  /* 水面折射的两团柔光，慢慢漂 */
+  .ray { position: fixed; inset: -20%; pointer-events: none; mix-blend-mode: screen; opacity: .18 }
+  .ray.a { background: radial-gradient(closest-side at 30% 22%, #a9e2ff, transparent 70%); animation: sway 26s ease-in-out infinite alternate }
+  .ray.b { background: radial-gradient(closest-side at 74% 14%, #7fe0ff, transparent 70%); animation: sway 35s ease-in-out infinite alternate-reverse }
+  @keyframes sway { from { transform: translate3d(-3%, 0, 0) scale(1) } to { transform: translate3d(4%, 3%, 0) scale(1.12) } }
+  /* 四周压暗（压在角色下面，不吃角色亮度） */
+  #vignette { position: fixed; inset: 0; pointer-events: none;
+              background: radial-gradient(125% 95% at 50% 45%, transparent 52%, rgba(0, 0, 0, .55) 100%) }
+  #bubbles, #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block }
+</style>
+<div id="sea"></div>
+<div class="ray a"></div>
+<div class="ray b"></div>
+<div id="vignette"></div>
+<canvas id="bubbles"></canvas>
+<canvas id="stage"></canvas>
+
+<script type="module">
+  import { Player } from '../dist/index.js'
+
+  const q = new URLSearchParams(location.search)
+  const id = q.get('char') || 'p01'                 // 大肥鱼 = Kujira；Q 版是 p02
+  const baseZoom = Number(q.get('zoom') ?? 1) || 1
+  const baseY = Number(q.get('y') ?? 0) || 0
+  const dpr = Number(q.get('dpr') ?? 1.5) || 1.5
+
+  /* ---------- 气泡：一层很淡的 2D 画布，在角色后面慢慢往上冒 ---------- */
+  if (q.get('bubbles') !== '0') {
+    const bc = document.getElementById('bubbles'), g = bc.getContext('2d')
+    let W = 0, H = 0
+    const fit = () => {
+      const d = Math.min(devicePixelRatio || 1, 2)
+      W = bc.width = Math.round(innerWidth * d)
+      H = bc.height = Math.round(innerHeight * d)
+    }
+    fit(); addEventListener('resize', fit)
+    const rnd = (a, b) => a + Math.random() * (b - a)
+    const bubbles = Array.from({ length: 48 }, () => ({
+      x: Math.random(), y: Math.random(), r: rnd(1.2, 5.5),         // r 是 CSS px
+      v: rnd(0.012, 0.045),                                          // 屏高 / 秒
+      w: rnd(0.6, 1.6), ph: rnd(0, Math.PI * 2), a: rnd(0.05, 0.16),
+    }))
+    let last = performance.now()
+    const tick = (now) => {
+      requestAnimationFrame(tick)
+      const dt = Math.min((now - last) / 1000, 0.1); last = now
+      if (document.hidden) return
+      const d = W / innerWidth
+      g.clearRect(0, 0, W, H)
+      for (const b of bubbles) {
+        b.y -= b.v * dt
+        b.ph += dt * b.w
+        if (b.y < -0.05) { b.y = 1.05; b.x = Math.random() }
+        const x = (b.x + Math.sin(b.ph) * 0.006) * W, y = b.y * H, r = b.r * d
+        g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2)
+        g.strokeStyle = `rgba(200, 235, 255, ${b.a})`
+        g.lineWidth = Math.max(1, d * 0.6)
+        g.stroke()
+        g.fillStyle = `rgba(190, 230, 255, ${b.a * 0.35})`
+        g.fill()
+      }
+    }
+    requestAnimationFrame(tick)
+  }
+
+  /* ---------- 角色 ---------- */
+  async function main() {
+    if (!Player.isSupported()) { console.error('LivLiv: 这个浏览器没有 WebGL2'); return }
+
+    const player = new Player(document.getElementById('stage'), {
+      idle: true,                                  // 呼吸、眨眼、摇摆、看鼠标
+      followPointer: 'page',
+      maxPixelRatio: Math.min(dpr, 2),
+    })
+    window.player = player
+    player.view.zoom = baseZoom
+    player.view.y = baseY
+
+    const load = async (src) => {
+      try { return await player.load(src) }
+      catch (e) {
+        if (typeof src === 'string' && src.endsWith('.livliv')) return player.load(src.replace(/\.livliv$/, '/'))
+        throw e
+      }
+    }
+    const info = await load(`../characters/${id}.livliv`)
+    console.log(`LivLiv wallpaper: ${info.name} (${id}) · ${info.format} v${info.version}`)
+
+    /* 缓慢游动：整幅画面左右巡游 + 一点点浮沉 + 极慢的推进感 */
+    const t0 = performance.now()
+    const swim = (now) => {
+      requestAnimationFrame(swim)
+      if (document.hidden) return
+      const t = (now - t0) / 1000
+      player.view.zoom = baseZoom + Math.sin(t * 0.07) * 0.015
+      player.view.x = Math.sin(t * 0.09) * 0.022
+      player.view.y = baseY + Math.sin(t * 0.23) * 0.006
+    }
+    requestAnimationFrame(swim)
+  }
+
+  main().catch((e) => console.error(e))
+</script>
+</html>
