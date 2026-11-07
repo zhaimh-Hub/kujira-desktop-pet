@@ -1,91 +1,212 @@
-# 大肥鱼桌宠（Kujira Desktop Pet）
+# 大肥鱼桌宠 · Kujira Desktop Pet
 
-把 [livliv-dev/player](https://github.com/livliv-dev/player) 的 2.5D 角色做成**桌面宠物 + 会干活的 AI 助手**：
-透明无边框窗口、真人音色朗读、真实振幅口型、多步工具调用、本地视觉、任务提醒、微信发送（人工确认）。
+基于 [livliv-dev/player](https://github.com/livliv-dev/player) 2.5D 角色渲染的 Windows 桌面宠物。
+透明无边框窗口，支持语音朗读与口型同步、多步 AI 工具调用、本地视觉与记忆、定时提醒与任务面板。
 
-> 本项目只是「外壳 + 页面 + 代理」，**依赖上游 player 库**（角色与渲染）。角色模型（`.livliv`）请从上游或你自备的包里获取。
+- 渲染层：LivLiv Player（WebGL2，`.livliv` 角色包）
+- 外壳：Electron（无边框 / 透明 / 置顶 / 托盘 / 全局热键）
+- 智能体：本地 HTTP 代理（31+ 工具，DeepSeek 或本地 Ollama 双后端）
+
+> 本仓库不包含角色模型与上游渲染库，仅包含「外壳 + 页面 + 工具代理」。角色包请自行准备或从上游获取。
+
+---
 
 ## 功能
 
-| 能力 | 说明 |
+| 模块 | 说明 |
 |---|---|
-| 桌面宠物 | Electron 透明窗口、无边框、置顶、可拖拽、托盘菜单、全局热键 `Ctrl+Alt+空格` |
-| 会说话 | edge-tts 真人音色（失败退系统语音）；**说话时音量/口型按真实音频振幅驱动**，🔊 可静音 |
-| 会干活 | 34 个工具：开应用/读文件/写笔记/设提醒/重复任务/查天气/翻译/联网搜索/音量/媒体/截图/读屏/打字/组合键/另存为/发微信… |
-| 写文件/跑代码 | \write_file\（≤1MB）、\un_python\（≤60s）、\pcap_summary\（tshark 分析 pcap） |
-| 多步任务 | 最多 8 轮工具循环，SSE 实时进度显示在气泡里 |
-| 本地记忆 | `bge-m3` 向量记忆（Ollama），语义召回 |
-| 本地视觉 | `qwen2.5vl:7b` 读屏、OCR，不联网、不花钱 |
-| 任务面板 | `pages/pet-tasks.html`：暂停/恢复/改间隔/删除，`Ctrl+Alt+T` 打开 |
-| 安全 | 应用白名单、路径白名单、危险操作二次确认、**对外发送必须人工确认** |
+| 桌面宠物 | 透明无边框窗口、可拖拽、置顶、托盘菜单、全局热键唤出 |
+| 语音 | edge-tts 中文真人音色，失败自动降级系统语音；说话时口型随真实音频振幅变化 |
+| 对话 | 气泡式对话，支持多行输入（Shift+Enter 换行）、随时中止、历史对话回看 |
+| 智能体 | 31+ 工具：打开应用、读写文件、执行 Python、分析 pcap、查询天气、翻译、联网搜索、音量与媒体控制、截图读屏、模拟输入等 |
+| 多步任务 | 单条指令最多 8 轮工具调用，执行过程以 SSE 实时回显 |
+| 本地能力 | `bge-m3` 向量记忆、`qwen2.5vl` 视觉读屏、提醒与重复任务，均可离线运行 |
+| 任务面板 | 浏览器打开的任务管理页：暂停 / 恢复 / 修改间隔 / 删除 |
+
+---
+
+## 环境要求
+
+| 依赖 | 版本 / 说明 |
+|---|---|
+| 操作系统 | Windows 10 / 11（依赖 Win32 API 与 PowerShell） |
+| Node.js | 18 或更高 |
+| Electron | 由 `npm install` 自动安装 |
+| 上游 player 库 | 与本仓库同级存放于 `../player` |
+| 聊天后端 | DeepSeek API Key，或本地 Ollama（`qwen3.5:4b` 等） |
+| 可选 | Ollama + `bge-m3`（向量记忆）、`qwen2.5vl:7b`（视觉）、Wireshark（pcap 分析） |
+
+---
+
+## 安装
+
+```powershell
+# 1. 取得上游渲染库（与仓库同级）
+git clone https://github.com/livliv-dev/player.git ..\player
+cd ..\player
+pnpm install
+pnpm build
+cd ..\kujira-pet
+
+# 2. 安装依赖并部署页面
+.\setup.ps1
+```
+
+`setup.ps1` 会完成三件事：检查 `../player`、把 `pages/*.html` 复制到 `player/example/`、安装 Electron 并生成 `config.json`。
+
+### 配置
+
+编辑 `config.json`：
+
+```json
+{
+  "provider": "auto",
+  "deepseekKey": "sk-...",
+  "deepseekModel": "deepseek-chat",
+  "ollamaUrl": "http://127.0.0.1:11434",
+  "model": "qwen3.5:4b",
+  "visionModel": "qwen2.5vl:7b",
+  "embedModel": "bge-m3"
+}
+```
+
+也可以不写 `deepseekKey`，改用环境变量 `DEEPSEEK_API_KEY`。
+
+`provider` 可选 `auto` / `deepseek` / `ollama`：
+
+- `auto`：有 Key 走云端，没有则走本地
+- `deepseek`：固定云端，本地显存全部留给视觉模型（推荐）
+- `ollama`：完全离线
+
+### 启动
+
+```powershell
+npm start
+```
+
+首次启动会在屏幕右下角出现桌宠，并常驻托盘。
+
+---
+
+## 使用
+
+### 热键
+
+| 热键 | 功能 |
+|---|---|
+| `Ctrl+Alt+Space` | 唤出桌宠（未运行则启动） |
+| `Ctrl+Alt+T` | 打开任务面板 |
+| `Ctrl+Alt+H` | 显示 / 隐藏 |
+| `Ctrl+Alt+P` | 鼠标点击穿透 |
+| `Ctrl+Alt+↑` / `↓` | 放大 / 缩小 |
+| `Ctrl+Alt+R` | 重新加载页面 |
+| `Ctrl+Alt+Q` | 退出 |
+
+### 交互
+
+| 操作 | 说明 |
+|---|---|
+| 双击画布 | 展开输入框 |
+| `Enter` | 发送消息 |
+| `Shift+Enter` | 换行 |
+| 点击发送键（工作中） | 中止当前请求 |
+| 拖动气泡边缘 / 拖动文字 | 移动气泡 / 选中文字 |
+| 右键 | 剪切、复制、粘贴、全选 |
+| 🔊 / 🕘 / 💬 | 语音开关 / 历史对话 / 输入框 |
+
+### 指令示例
+
+```
+现在几点了
+打开记事本，帮我打一行：今天的事明天再说
+读一下 D:\notes\周报.md 并总结三点
+用 run_python 把 data.csv 按日期排序，输出到 sorted.csv
+分析 D:\capture.pcapng，列出 HTTP 请求的主机和路径
+看一下屏幕上有什么字
+每 30 分钟提醒我看一眼论文
+```
+
+---
 
 ## 目录结构
 
 ```
 kujira-pet/
-├─ app/            Electron 壳（main.js / preload.js）与聊天代理（chat-proxy.mjs）
-├─ pages/          页面：pet-chat.html（主）、pet-tasks.html（任务面板）、my-pet.html、pet-card.html、wallpaper.html
-├─ tools/          win.ps1（音量/媒体/截图/打字/按键）、winx.cs（窗口枚举与点击）、PetHotkey.cs（常驻热键）
-├─ assets/         托盘与图标
-├─ docs/           搭建记录（含踩坑清单）
-├─ config.example.json
-└─ setup.ps1       一键准备：装依赖、把页面装进 player 的 example 目录
+├── app/
+│   ├── main.js          Electron 主进程：窗口、托盘、热键、内置静态服务
+│   ├── preload.js       拖拽、点击穿透、焦点控制
+│   └── chat-proxy.mjs   智能体：工具定义与执行、SSE 进度、TTS
+├── pages/
+│   ├── pet-chat.html    主界面（对话 / 语音 / 历史）
+│   ├── pet-tasks.html   任务面板
+│   ├── my-pet.html      无对话的纯桌宠
+│   ├── pet-card.html    卡片式（用于不支持透明的宿主）
+│   └── wallpaper.html   动态壁纸
+├── tools/
+│   ├── win.ps1          音量 / 媒体 / 截图 / 输入 / 另存为
+│   ├── winx.cs          窗口枚举、矩形获取、定点点击
+│   └── PetHotkey.cs     常驻热键小程序
+├── assets/              托盘与图标
+├── docs/                搭建与踩坑记录
+├── config.example.json
+└── setup.ps1
 ```
 
-## 人格
+---
 
-固定人格写在 \pp/chat-proxy.mjs\ 的 \systemPrompt\ 里：一只傲娇贪吃、干活靠谱的胖蓝鲸「大肥鱼」，自称「本鲸」。不确定时会直说，实操前先讲思路。
+## 工作原理
 
-## 快速开始
-
-```powershell
-# 0) 需要 Node.js 18+、Windows 10/11
-# 1) 准备依赖
-.\setup.ps1                 # 会在 ..\player 找上游库；没有会提示先 clone
-
-# 2) 配置（复制一份，填入自己的 key）
-Copy-Item config.example.json config.json
-# 编辑 config.json：填 deepseekKey 或设置环境变量 DEEPSEEK_API_KEY
-
-# 3) 启动
-npm start                   # 托盘出现，桌宠从右下角出来
+```
+Electron 主进程
+├── 静态服务 :8080 ── pages/*.html（渲染层与 UI）
+└── 智能体   :8787 ── /chat（SSE 流式）/convs /tasks /tts /reminders
 ```
 
-可选：本地模型（Ollama）
+1. 页面通过 `POST /chat?stream=1` 发起对话，代理将请求转发到 DeepSeek 或 Ollama。
+2. 模型返回工具调用时，代理在本机执行（写文件、跑 Python、调 PowerShell 等），结果回填后继续推理。
+3. 每个工具的执行进度通过 SSE 推回页面，显示在气泡中。
+4. 回复文本经情绪标签清洗后返回，页面驱动口型、表情与语音。
 
-```powershell
-ollama pull qwen3.5:4b        # 离线聊天（不想用云端时）
-ollama pull bge-m3            # 向量记忆
-ollama pull qwen2.5vl:7b      # 本地视觉（读屏）
-```
-
-## 热键
-
-| 热键 | 作用 |
-|---|---|
-| `Ctrl+Alt+空格` | 叫出/启动桌宠（由 `tools/PetHotkey.cs` 编译的常驻小程序提供） |
-| `Ctrl+Alt+T` | 打开任务面板 |
-| `Ctrl+Alt+H` | 显示/隐藏 |
-| `Ctrl+Alt+P` | 点击穿透 |
-| `Ctrl+Alt+↑ / ↓` | 缩放 |
-| `Ctrl+Alt+Q` | 退出 |
-
-## 隐私
-
-- **不含任何密钥**：`config.json` 与 `data/` 已在 `.gitignore` 中
-- 本机路径全部换成了占位符（`<APP_DIR>`、`<PLAYER_DIR>`、`<WECHAT_EXE>` 等），运行时会自动解析为真实路径
-- 视觉/记忆/提醒都在本地（Ollama + 本地文件），只有聊天会按你选择的 provider 联网
+---
 
 ## 已知限制
 
-- 微信发送**只能「先人工点开聊天 → 程序打字 → 人工确认 → 回车」**；自动搜索联系人不安全（曾把消息发进群聊），已停用
-- 停止键（工作中显示 ■）只完成了中止逻辑，视觉状态未完成
-- 视觉模型读小字不稳，需要更强模型
+- 微信发送仅支持「人工选择会话 → 程序输入 → 人工确认 → 回车」。自动搜索联系人不可靠（微信 4.x 的 `Ctrl+F` 无法保证焦点），相关功能已停用。
+- 本地视觉模型对屏幕小字识别不稳定，需要更强模型或人工确认。
+- `run_python` 与 `write_file` 具备真实的文件系统与网络访问能力，请勿在不受信任的输入下使用。
+- 仅支持 Windows。
 
-## 许可
+---
 
-本仓库代码 MIT。上游 player 库版权归其作者，按其各自许可使用。
+## 常见问题
 
-## 文档
+**端口被占用（8080 / 8787）**
+关闭占用进程，或在 `config.json` 中修改 `servePort` / `chatPort`。
 
-详细搭建与踩坑记录见 [docs/搭建记录.md](docs/搭建记录.md)。
+**没有声音**
+检查系统音量与页面右下角 🔊 是否关闭；edge-tts 需要联网，离线时可在 `config.json` 将 `tts.engine` 改为 `sapi`。
+
+**`Failed to fetch`**
+代理未就绪或刚重启。等待两秒后重试；仍失败时查看 `pet-shell.log` 与 `chat-proxy.log`。
+
+**微信消息发不出去**
+先手动点开目标会话，再说「往当前聊天发：内容」，确认气泡提示后再回复「确定」。
+
+**显存不足**
+将 `provider` 设为 `deepseek`，把显存留给视觉模型；或改用较小的视觉模型。
+
+---
+
+## 数据与隐私
+
+- 配置与运行时数据不进入版本库：`config.json`、`data/`、`*.log` 已在 `.gitignore` 中排除
+- 对话历史保存在 `data/conversations/*.json`，可直接复制迁移
+- 视觉、记忆、提醒均为本地处理；仅对话内容会按所选 provider 发送到云端
+
+---
+
+## 致谢与许可
+
+- 角色渲染：[livliv-dev/player](https://github.com/livliv-dev/player)
+- 本项目代码：MIT（见 [LICENSE](LICENSE)）
+- 上游库与角色包版权归各自作者所有
