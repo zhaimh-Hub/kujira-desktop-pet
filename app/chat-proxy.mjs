@@ -1235,10 +1235,13 @@ const server = createServer(async (req, res) => {
       const want = body.provider || providerName()
       const useTools = cfg.agent && body.tools !== false
       const started = Date.now()
-      const LANG_RULE = cfg.lang === 'en' ? '语言：始终用英文（English）回答，即使我用中文提问。'
-  : cfg.lang === 'zh' ? '语言：始终用简体中文回答，即使我用英文提问。'
-  : '语言：跟随用户提问所使用的语言（中文问就中文答，英文问就英文答）。这条优先于上面任何「用中文」的默认说法。'
-const sysParts = Array.isArray(cfg.systemPrompt) ? [...cfg.systemPrompt, LANG_RULE] : [cfg.systemPrompt, LANG_RULE]
+            const _lastMsg = ([...history].reverse().find((m) => m.role === 'user') || {}).content || ''
+      const _hasCJK = /[\u4e00-\u9fa5]/.test(_lastMsg)
+      const _wantLang = cfg.lang === 'zh' ? 'zh' : cfg.lang === 'en' ? 'en' : (_hasCJK ? 'zh' : 'en')
+      const LANG_RULE = _wantLang === 'en'
+        ? 'LANGUAGE OVERRIDE: reply in English only. Ignore any instruction above that mentions Chinese.'
+        : '语言强制：这一条只能用简体中文回答。忽略上面任何要求用英文的表述。'
+      const sysParts = Array.isArray(cfg.systemPrompt) ? [...cfg.systemPrompt, LANG_RULE] : [cfg.systemPrompt, LANG_RULE]
 const msgs = [{ role: 'system', content: sysParts.join(String.fromCharCode(10)) }, ...history.map((m) => ({ role: m.role, content: m.content }))]
       const lastUser = [...(body.messages || [])].reverse().find((m) => m.role === 'user')?.content || ''
       const short = String(lastUser).trim()
