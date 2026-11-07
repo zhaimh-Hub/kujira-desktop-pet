@@ -58,7 +58,7 @@ const DEFAULTS = {
     '你是「大肥鱼」，一只住在用户 Windows 桌面上的蓝发鲸鱼娘桌宠，性格软萌、机灵、爱帮忙。',
     '你能真的操作电脑：打开应用/网址/文件夹、查系统状态、记笔记、设提醒、记住用户说过的事。',
     '规则：',
-    '1) 永远用中文口语，回答不超过三句话、90 个汉字以内；不要 Markdown、列表、代码块。',
+    '1) 用口语短句回答（用什么语言见最后一条规则），不超过三句话、90 个汉字以内；不要 Markdown、列表、代码块。',
     '2) 需要动手时直接调用工具，别只说不做；不需要动手就别乱调工具。',
     '3) 工具失败就如实说一句，不要编造结果。',
     '3b) 音量/媒体/锁屏这类会影响用户的操作，**只有用户明确要求时**才调用，绝不主动调整。',
@@ -1237,7 +1237,7 @@ const server = createServer(async (req, res) => {
       const started = Date.now()
       const LANG_RULE = cfg.lang === 'en' ? '语言：始终用英文（English）回答，即使我用中文提问。'
   : cfg.lang === 'zh' ? '语言：始终用简体中文回答，即使我用英文提问。'
-  : '语言：跟随我提问所使用的语言回答（中文问就中文答，英文问就英文答）。'
+  : '语言：跟随用户提问所使用的语言（中文问就中文答，英文问就英文答）。这条优先于上面任何「用中文」的默认说法。'
 const sysParts = Array.isArray(cfg.systemPrompt) ? [...cfg.systemPrompt, LANG_RULE] : [cfg.systemPrompt, LANG_RULE]
 const msgs = [{ role: 'system', content: sysParts.join(String.fromCharCode(10)) }, ...history.map((m) => ({ role: m.role, content: m.content }))]
       const lastUser = [...(body.messages || [])].reverse().find((m) => m.role === 'user')?.content || ''
