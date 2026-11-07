@@ -1235,7 +1235,11 @@ const server = createServer(async (req, res) => {
       const want = body.provider || providerName()
       const useTools = cfg.agent && body.tools !== false
       const started = Date.now()
-      const msgs = [{ role: 'system', content: cfg.systemPrompt }, ...history.map((m) => ({ role: m.role, content: m.content }))]
+      const LANG_RULE = cfg.lang === 'en' ? '语言：始终用英文（English）回答，即使我用中文提问。'
+  : cfg.lang === 'zh' ? '语言：始终用简体中文回答，即使我用英文提问。'
+  : '语言：跟随我提问所使用的语言回答（中文问就中文答，英文问就英文答）。'
+const sysParts = Array.isArray(cfg.systemPrompt) ? [...cfg.systemPrompt, LANG_RULE] : [cfg.systemPrompt, LANG_RULE]
+const msgs = [{ role: 'system', content: sysParts.join(String.fromCharCode(10)) }, ...history.map((m) => ({ role: m.role, content: m.content }))]
       const lastUser = [...(body.messages || [])].reverse().find((m) => m.role === 'user')?.content || ''
       const short = String(lastUser).trim()
       const saysYes = short.length <= 8 && /(确定|确认|发吧|可以|好的|行|发|yes|ok)/i.test(short)

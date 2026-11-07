@@ -9,6 +9,7 @@
   "startChatProxy": true,
 
   "provider": "auto",
+  "lang": "auto",
   "deepseekKey": "",
   "deepseekModel": "deepseek-chat",
   "ollamaUrl": "http://127.0.0.1:11434",

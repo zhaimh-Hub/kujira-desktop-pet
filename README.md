@@ -1,5 +1,7 @@
 # 大肥鱼桌宠 · Kujira Desktop Pet
 
+**简体中文** ｜ [English](README.en.md)
+
 基于 [livliv-dev/player](https://github.com/livliv-dev/player) 2.5D 角色渲染的 Windows 桌面宠物。
 透明无边框窗口，支持语音朗读与口型同步、多步 AI 工具调用、本地视觉与记忆、定时提醒与任务面板。
 
