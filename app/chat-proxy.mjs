@@ -1111,6 +1111,15 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { ok: !!r.data?.focused, focused: r.data?.focused || '' })
     }
 
+    if (url.pathname === '/convs/delete') {
+      const id = String(url.searchParams.get('id') || '').replace(/[^\w-]/g, '')
+      log('收到删除对话请求 id=' + id)
+      const f = path.join(DATA, 'conversations', id + '.json')
+      if (!id) return json(res, 400, { error: 'id 为空' })
+      if (!existsSync(f)) return json(res, 404, { error: '没有这段对话', id })
+      try { unlinkSync(f); log('已删除对话 ' + id); return json(res, 200, { ok: true, id }) } catch (e) { log('删除失败 ' + e.message); return json(res, 500, { error: e.message }) }
+    }
+
     // ---- 历史对话（写文件，跨设备可取）----
     if (req.method === 'GET' && url.pathname === '/convs') {
       const dir = path.join(DATA, 'conversations')

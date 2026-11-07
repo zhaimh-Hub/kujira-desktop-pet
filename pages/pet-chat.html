@@ -623,9 +623,13 @@
     say.value = ''
     grow()
   }, 0)
-  /* ===== 对话历史（写文件到 data/conversations，跨设备可取） ===== */
+  /* ===== 对话历史（写文件，可回看/删除） ===== */
   let convId = null
-  function convApi(p, opt) { return fetch(API + p, opt).then((r) => (r.ok ? r.json() : null)).catch(() => null) }
+  const convUrl = (p) => API + p
+  async function convApi(p, opt) {
+    try { const r = await fetch(convUrl(p), opt); return r.ok ? await r.json() : null } catch (e) { return null }
+  }
+
   async function saveCurrentConv() {
     if (!history || !history.length) return
     if (!convId) convId = 'c' + Date.now()
@@ -634,35 +638,45 @@
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ id: convId, messages: history.slice(-60) }),
     })
-    if (!r) {   // 代理不在时退回 localStorage，至少不丢
-      try {
-        const k = 'pet:convs'
-        const list = JSON.parse(localStorage.getItem(k) || '[]')
-        const i = list.findIndex((c) => c.id === convId)
-        const item = { id: convId, time: Date.now(), title: '本地暂存', messages: history.slice(-60) }
-        if (i >= 0) list[i] = item; else list.push(item)
-        localStorage.setItem(k, JSON.stringify(list.slice(-40)))
-      } catch (e) { /* ignore */ }
-    }
+    if (!r) tip.textContent = '历史没存上（代理离线？）'
   }
+
+  async function deleteConv(id, rowEl) {
+    try {
+      const r = await fetch(convUrl('/convs/delete?id=' + encodeURIComponent(id)))
+      if (!r.ok) { tip.textContent = '删除失败：HTTP ' + r.status; return false }
+    } catch (e) { tip.textContent = '删除失败：' + e.message; return false }
+    if (rowEl) rowEl.remove()
+    return true
+  }
+
   async function openHistory() {
     const box = document.getElementById('hist')
     box.textContent = ''
     const data = await convApi('/convs')
     const list = (data && data.list) || []
     if (!list.length) {
-      const e = document.createElement('div'); e.className = 'hempty'; e.textContent = '还没有历史对话（代理需在线）'
-      box.append(e)
+      const empty = document.createElement('div')
+      empty.className = 'hempty'
+      empty.textContent = '还没有历史对话'
+      box.append(empty)
     }
     for (const c of list) {
-      const row = document.createElement('div'); row.className = 'hrow'
-      const g = document.createElement('div'); g.className = 'hgrow'
-      const t = document.createElement('div'); t.className = 'htext'; t.textContent = c.title || '（无标题）'
-      const d = document.createElement('div'); d.className = 'htime'
-      d.textContent = new Date(c.time).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' · ' + (c.count || 0) + ' 条'
-      g.append(t, d)
-      const btn = document.createElement('button'); btn.textContent = '打开'
-      btn.onclick = async (ev) => {
+      const row = document.createElement('div')
+      row.className = 'hrow'
+      const grow = document.createElement('div')
+      grow.className = 'hgrow'
+      const title = document.createElement('div')
+      title.className = 'htext'
+      title.textContent = c.title || '（无标题）'
+      const time = document.createElement('div')
+      time.className = 'htime'
+      time.textContent = new Date(c.time).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' · ' + (c.count || 0) + ' 条'
+      grow.append(title, time)
+
+      const openBtn = document.createElement('button')
+      openBtn.textContent = '打开'
+      openBtn.onclick = async (ev) => {
         ev.stopPropagation()
         const full = await convApi('/convs/' + encodeURIComponent(c.id))
         if (!full || !full.messages) return
@@ -673,45 +687,35 @@
         const last = [...history].reverse().find((m) => m.role === 'assistant')
         showBubble(last ? last.content : '（这段没有答复）', '历史对话 · ' + (full.title || ''))
       }
-      const btnDel = document.createElement('button')
-      btnDel.textContent = '删'
-      btnDel.title = '删除这段对话'
-      btnDel.onclick = async (ev) => {
+
+      const delBtn = document.createElement('button')
+      delBtn.textContent = '删'
+      delBtn.style.marginLeft = '4px'
+      delBtn.onclick = async (ev) => {
         ev.stopPropagation()
-        // 不用 window.confirm：无边框透明窗口里它不会弹出来，点了没反应
-        if (!btnDel.dataset.armed) {
-          btnDel.dataset.armed = '1'
-          btnDel.textContent = '确认'
-          btnDel.style.background = '#b93b3b'
-          btnDel.style.color = '#fff'
-          setTimeout(() => {
-            if (btnDel.dataset.armed) { delete btnDel.dataset.armed; btnDel.textContent = '删'; btnDel.style.background = ''; btnDel.style.color = '' }
-          }, 3000)
-          return
-        }
-        delete btnDel.dataset.armed
-        try {
-          const r = await fetch(API + '/convs/' + encodeURIComponent(c.id), { method: 'DELETE' })
-          if (!r.ok) tip.textContent = '删除失败：HTTP ' + r.status
-        } catch (e) { tip.textContent = '删除失败：' + e.message }
-        openHistory()
+        ev.preventDefault()
+        delBtn.disabled = true
+        delBtn.textContent = '…'
+        const ok = await deleteConv(c.id, row)
+        if (!ok) { delBtn.disabled = false; delBtn.textContent = '删' }
       }
-      row.append(g, btn, btnDel)
+
+      row.append(grow, openBtn, delBtn)
       box.append(row)
     }
     document.getElementById('histWrap').classList.add('show')
   }
+
   setTimeout(() => {
     const hb = document.getElementById('histbtn')
     const hc = document.getElementById('hclose')
     if (hb) hb.onclick = (e) => { e.stopPropagation(); openHistory() }
     if (hc) hc.onclick = (e) => { e.stopPropagation(); document.getElementById('histWrap').classList.remove('show') }
   }, 0)
+
   let _lastLen = 0
   setInterval(() => {
-    try {
-      if (history.length && history.length !== _lastLen) { _lastLen = history.length; saveCurrentConv() }
-    } catch (e) { /* ignore */ }
+    if (history.length && history.length !== _lastLen) { _lastLen = history.length; saveCurrentConv() }
   }, 1200)
 </script>
 </html>
