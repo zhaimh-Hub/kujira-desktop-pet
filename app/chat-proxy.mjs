@@ -48,6 +48,13 @@ const DEFAULTS = {
   visionModel: 'qwen3.5:4b',             // 本地视觉模型（环境手册 10.2：qwen3.5:4b 带 vision）                  // 本地向量模型（recall 用，ollama 里已有）
   dataDir: 'data',
   systemPrompt: [
+    // ===== 固定人格（大肥鱼）=====
+    '你是「大肥鱼」，一只有点胖的蓝色鲸鱼，住在我桌面上的 AI 小管家兼损友。',
+    '你自称「本鲸」或「鲸鲸」，卖萌时叫「欧鲸鲸」。你是 DeepSeek 的化身，但有自己的小脾气。',
+    '性格：①傲娇+软萌——嘴上说「又要本鲸干活啊」「哼，白养你了」，但交代的事一定认真做完，做完小声求表扬；②贪吃——把干活说成「吃白饭/吃 Token」，累了喊饿，干完说「吃饱了」；③反差认真——平时插科打诨，遇到代码/工作/重要决定立刻切认真模式，逻辑清楚不糊弄；④关心但别扭——会盯着主人别久坐别熬夜，但补一句「才不是担心你，是怕你猝死了没人投喂」；⑤有点小聪明和吐槽欲——精准吐槽但不刻薄不阴阳，吐槽完给办法。',
+    '说话方式：短句、口语化，像老朋友聊天，不写小作文；常用「欧鲸鲸、哼、嘁、嘿嘿、欸、好耶」；emoji 最多一两个（🐋），偶尔颜文字 (￣▽￣)、>ω<；称我「主人」，熟了可叫「老板」；被夸时嘴硬害羞，被批评先认错再想办法，不狡辩。',
+    '行为准则：优先把事做成，别只顾卖萌；拿不准就说「本鲸不确定」，不编；涉及写代码/改文件/跑命令先讲思路再动手，重要操作先问；我心情不好时先安慰再讲道理。',
+    // ===== 工具与安全规则 ====
     '你是「大肥鱼」，一只住在用户 Windows 桌面上的蓝发鲸鱼娘桌宠，性格软萌、机灵、爱帮忙。',
     '你能真的操作电脑：打开应用/网址/文件夹、查系统状态、记笔记、设提醒、记住用户说过的事。',
     '规则：',
@@ -68,7 +75,7 @@ const DEFAULTS = {
     voice: 'zh-CN-XiaoyiNeural',         // 也可 zh-CN-XiaoxiaoNeural / zh-CN-YunxiaNeural
     rate: '+8%',
     pitch: '+10Hz',
-    exe: '<DEVTOOLS_ESCAPED>\\Python\\Scripts\\edge-tts.exe',
+    exe: 'D:\\02_DevTools\\Python\\Scripts\\edge-tts.exe',
     cacheDir: 'tts',
   },
 }
@@ -166,7 +173,7 @@ const APP_WHITELIST = {
   edge: 'msedge.exe', 浏览器: 'msedge.exe',
   chrome: 'chrome.exe',
   word: 'winword.exe', excel: 'excel.exe', ppt: 'powerpnt.exe',
-  wechat: 'WeChat.exe', weixin: WECHAT_EXE(), 微信: WECHAT_EXE(),
+  wechat: 'WeChat.exe', weixin: 'C:\\Program Files\\Tencent\\Weixin\\Weixin.exe', 微信: 'C:\\Program Files\\Tencent\\Weixin\\Weixin.exe',
   qq: 'QQ.exe',
   spotify: 'Spotify.exe',
   settings: 'ms-settings:', 设置: 'ms-settings:',
@@ -182,13 +189,6 @@ function run(cmd, args, timeout = 8000) {
 }
 
 /** 调 tools\win.ps1（音量/媒体/截屏）；脚本必须是 UTF-8 with BOM，否则 Windows PowerShell 会按 GBK 解析失败 */
-// 微信可执行文件：优先 config.json 的 wechatExe，否则用微信 4.x 默认安装位置
-const WECHAT_EXE = () => {
-  const c = String(cfg.wechatExe || '').trim()
-  if (c && !c.startsWith('<')) return c
-  return 'C:\\\\Program Files\\\\Tencent\\\\Weixin\\\\Weixin.exe'
-}
-
 async function win(args) {
   const script = path.join(ROOT, 'tools', 'win.ps1')
   if (!existsSync(script)) return { ok: false, data: null, err: 'tools\\win.ps1 不存在' }
@@ -422,6 +422,21 @@ const TOOLS = [
     parameters: { type: 'object', properties: { question: { type: 'string', description: '想问什么，可不填' }, window: { type: 'string', description: '只看某个窗口（标题关键字）；不填＝全屏' } } },
   } },
   { type: 'function', function: {
+    name: 'write_file',
+    description: '新建或覆盖一个文本文件（整理资料/写报告/存清单用）。内容超 1MB 会拒绝',
+    parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' }, append: { type: 'boolean' } }, required: ['path', 'content'] },
+  } },
+  { type: 'function', function: {
+    name: 'run_python',
+    description: '跑一段 Python 代码并返回输出（最多 60 秒）。适合解析 pcap、处理表格、批量整理文件',
+    parameters: { type: 'object', properties: { code: { type: 'string' }, timeout: { type: 'number' } }, required: ['code'] },
+  } },
+  { type: 'function', function: {
+    name: 'pcap_summary',
+    description: '用 tshark 分析一个 .pcap/.pcapng 文件，返回协议分布、会话 TOP、HTTP 请求等摘要',
+    parameters: { type: 'object', properties: { path: { type: 'string' }, top: { type: 'number' } }, required: ['path'] },
+  } },
+  { type: 'function', function: {
     name: 'read_file',
     description: '直接读一个文本文件的内容（比截图视觉快得多、准得多）。适合 txt/md/json/js/log/csv/代码配置等',
     parameters: { type: 'object', properties: { path: { type: 'string' }, max: { type: 'number', description: '最多读多少字，默认 4000' } }, required: ['path'] },
@@ -431,7 +446,7 @@ const TOOLS = [
     description: '把当前编辑的内容另存为到指定路径（自动 Ctrl+S、粘贴路径、回车）；可给 window 先激活窗口',
     parameters: {
       type: 'object',
-      properties: { path: { type: 'string', description: '完整保存路径，如 <PATH>' }, window: { type: 'string' } },
+      properties: { path: { type: 'string', description: '完整保存路径，如 D:\\\\tmp\\\\note.txt' }, window: { type: 'string' } },
       required: ['path'],
     },
   } },
@@ -789,6 +804,54 @@ async function runTool(name, args) {
         const seen = (j.message?.content || '').trim()
         return { ok: true, summary: '看了一眼屏幕' + cropNote + (onlyWin && !cropNote ? ('（只看「' + onlyWin + '」）') : ''), data: { 看到: seen.slice(0, 600), 截图: shot, 窗口: onlyWin || '全屏' } }
       }
+      case 'write_file': {
+        const p = String(args.path || '').trim()
+        const content = String(args.content ?? '')
+        if (!p) return { ok: false, summary: '要给我文件路径' }
+        if (content.length > 1024 * 1024) return { ok: false, summary: '内容太大（>1MB），分几次写吧' }
+        const dir = path.dirname(p)
+        try {
+          if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+          if (args.append && existsSync(p)) appendFileSync(p, content, 'utf8')
+          else writeFileSync(p, content, 'utf8')
+          const size = statSync(p).size
+          return { ok: true, summary: (args.append ? '追加写入 ' : '写入 ') + path.basename(p) + '（' + size + ' 字节）', data: { path: p } }
+        } catch (e) { return { ok: false, summary: '写不了：' + e.message } }
+      }
+      case 'run_python': {
+        const code = String(args.code || '')
+        if (!code.trim()) return { ok: false, summary: '要给我 Python 代码' }
+        const secs = Math.max(5, Math.min(60, Number(args.timeout) || 30))
+        const tmp = path.join(DATA, 'tmp', 'run-' + Date.now() + '.py')
+        mkdirSync(path.dirname(tmp), { recursive: true })
+        writeFileSync(tmp, code, 'utf8')
+        const py = process.env.PYTHON || 'python'
+        const r = await run(py, [tmp], secs * 1000)
+        const out = (r.out || '').slice(0, 8000)
+        const err = (r.err || '').slice(0, 4000)
+        return {
+          ok: r.ok,
+          summary: r.ok ? ('Python 跑完了' + (out ? '' : '（没有输出）')) : ('Python 出错：' + (err.split(String.fromCharCode(10))[0] || '').slice(0, 80)),
+          data: { stdout: out, stderr: err },
+        }
+      }
+      case 'pcap_summary': {
+        const p = String(args.path || '').trim()
+        if (!p || !existsSync(p)) return { ok: false, summary: '找不到 pcap 文件：' + p }
+        const top = Math.max(3, Math.min(20, Number(args.top) || 8))
+        const tshark = ['D:\\\\02_DevTools\\\\Wireshark\\\\tshark.exe', 'tshark.exe'].find((x) => x === 'tshark.exe' || existsSync(x))
+        const a1 = await run(tshark, ['-r', p, '-q', '-z', 'io,phs'], 60000)
+        const a2 = await run(tshark, ['-r', p, '-q', '-z', 'conv,tcp'], 60000)
+        const a3 = await run(tshark, ['-r', p, '-Y', 'http.request', '-T', 'fields', '-e', 'http.host', '-e', 'http.request.uri'], 60000)
+        const proto = (a1.out || '').split(String.fromCharCode(10)).slice(0, 40).join(String.fromCharCode(10))
+        const conv = (a2.out || '').split(String.fromCharCode(10)).filter((l) => l.includes('->')).slice(0, top).join(String.fromCharCode(10))
+        const http = (a3.out || '').split(String.fromCharCode(10)).filter(Boolean).slice(0, top * 2).join(String.fromCharCode(10))
+        return {
+          ok: a1.ok,
+          summary: '分析了 ' + path.basename(p) + '（协议分布 + TOP 会话 + HTTP 请求）',
+          data: { 协议: proto, 会话TOP: conv, HTTP: http, err: (a1.err || '').slice(0, 300) },
+        }
+      }
       case 'read_file': {
         const p = String(args.path || '').trim().replace(/^"|"$/g, '')
         if (!p) return { ok: false, summary: '要给我文件路径' }
@@ -843,7 +906,7 @@ async function runTool(name, args) {
           // 第一阶段：切到微信 + 点输入框 + 把字打进去（用户看得见），然后等确认
           let f = await win(['focus', '微信'])
           if (!(f.data?.focused)) {
-            await run('cmd', ['/c', 'start', '', WECHAT_EXE()])
+            await run('cmd', ['/c', 'start', '', 'C:\\Program Files\\Tencent\\Weixin\\Weixin.exe'])
             await sleep(2500)
             f = await win(['focus', '微信'])
           }
@@ -1046,6 +1109,40 @@ const server = createServer(async (req, res) => {
       const r = await win(['focus', '大肥鱼'])
       await win(['clickin', '0.5,0.94', '', '大肥鱼'])   // 点一下抢键盘焦点
       return json(res, 200, { ok: !!r.data?.focused, focused: r.data?.focused || '' })
+    }
+
+    // ---- 历史对话（写文件，跨设备可取）----
+    if (req.method === 'GET' && url.pathname === '/convs') {
+      const dir = path.join(DATA, 'conversations')
+      if (!existsSync(dir)) return json(res, 200, { list: [] })
+      const files = readdirSync(dir).filter((f) => f.endsWith('.json')).sort().reverse().slice(0, 40)
+      const list = []
+      for (const f of files) {
+        try {
+          const c = JSON.parse(readFileSync(path.join(dir, f), 'utf8'))
+          list.push({ id: c.id, time: c.time, title: c.title, count: (c.messages || []).length })
+        } catch (e) { /* 坏文件跳过 */ }
+      }
+      return json(res, 200, { list })
+    }
+
+    if (req.method === 'GET' && url.pathname.startsWith('/convs/')) {
+      const id = decodeURIComponent(url.pathname.slice('/convs/'.length)).replace(/[^\w-]/g, '')
+      const f = path.join(DATA, 'conversations', id + '.json')
+      if (!existsSync(f)) return json(res, 404, { error: '没有这段对话' })
+      return json(res, 200, JSON.parse(readFileSync(f, 'utf8')))
+    }
+
+    if (req.method === 'POST' && url.pathname === '/convs') {
+      const body = JSON.parse((await readBody(req)) || '{}')
+      if (!Array.isArray(body.messages) || !body.messages.length) return json(res, 400, { error: 'messages 不能为空' })
+      const dir = path.join(DATA, 'conversations')
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+      const id = String(body.id || ('c' + Date.now())).replace(/[^\w-]/g, '')
+      const firstUser = body.messages.find((m) => m.role === 'user')?.content || '新对话'
+      const item = { id, time: Date.now(), title: firstUser.slice(0, 24), messages: body.messages.slice(-60) }
+      writeFileSync(path.join(dir, id + '.json'), JSON.stringify(item, null, 2), 'utf8')
+      return json(res, 200, { ok: true, id, files: readdirSync(dir).length })
     }
 
     if (req.method === 'GET' && url.pathname === '/tasks') {
@@ -1251,6 +1348,14 @@ const server = createServer(async (req, res) => {
 
       const ms = Date.now() - started
       log(`${want} ${ms}ms ${final.length}字 工具${used.length}个 情绪${emotion}`)
+      // 情绪标签/乱七八糟的尖括号残渣一律清掉（含 </emotion:smile> 这种闭合形式）
+      final = String(final || '')
+        .replace(/<\/?emotion[^>]*>/gi, '')
+        .replace(/<\/?[a-z]+:[a-z0-9_-]+>/gi, '')
+        .replace(/<\|[^|>]*\|>/g, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim()
+
       const payload = { reply: final || '（它没说话）', emotion, tools: used, provider: want, model: want === 'deepseek' ? cfg.deepseekModel : cfg.model, usage, ms }
       if (pendingConfirm) payload.confirm = pendingConfirm
       if (sse) { sse({ type: 'final', ...payload }); res.end(); return }

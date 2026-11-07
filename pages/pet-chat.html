@@ -55,6 +55,9 @@
   @keyframes dots { 0% { opacity: .2 } 50% { opacity: 1 } 100% { opacity: .2 } }
 
   /* 输入条：默认收起，双击我或点 💬 才出现 */
+  #say { flex: 1; min-width: 0; resize: none; overflow-y: auto; max-height: 96px; padding: 7px 10px; border-radius: 14px;
+    border: 1px solid #ffffff24; background: #0b1524cc; color: #e8eefc; font: 12.5px/1.4 system-ui, 'Microsoft YaHei', sans-serif; outline: none }
+  #say::placeholder { color: #7f8ea8 }
   #bar {
     position: absolute; left: 8px; right: 44px; bottom: 8px; z-index: 3;
     display: flex; gap: 6px; align-items: center;
@@ -115,18 +118,72 @@
   #ask .q { margin-bottom: 7px; word-break: break-word }
   #ask .btns { display: flex; gap: 7px }
   #ask button { flex: 1; padding: 6px 0; border-radius: 9px; border: 1px solid #ffffff33; background: #ffffff18; color: #fff; font: inherit; cursor: pointer }
-  #ask button#askYes { background: #3b82f6e6; border-color: transparent }</style>
+  #ask button#askYes { background: #3b82f6e6; border-color: transparent }  /* —— 历史对话 —— */
+  #histbtn { position: absolute; right: 6px; bottom: 124px; z-index: 20; width: 30px; height: 30px; border-radius: 50%;
+    border: 1.5px solid #ffffff73; background: #0b1524f2; color: #dce8ff; font-size: 14px; cursor: pointer; opacity: .95; box-shadow: 0 2px 8px #000a }
+  #histbtn:hover { transform: scale(1.08); opacity: 1 }
+  #histWrap { position: absolute; inset: 6px; z-index: 30; display: none; flex-direction: column;
+    background: #0b1524f7; border: 1px solid #ffffff2e; border-radius: 14px; overflow: hidden }
+  #histWrap.show { display: flex }
+  .hhead { display: flex; justify-content: space-between; align-items: center; padding: 8px 11px; font: 12px/1 system-ui, 'Microsoft YaHei', sans-serif; color: #cfe0ff; border-bottom: 1px solid #ffffff1f }
+  .hhead button { width: 22px; height: 22px; border-radius: 50%; border: 1px solid #ffffff33; background: #ffffff14; color: #fff; cursor: pointer }
+  #hist { flex: 1; overflow-y: auto; padding: 6px }
+  .hrow { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 10px }
+  .hrow:hover { background: #ffffff12 }
+  .hgrow { flex: 1; min-width: 0 }
+  .htext { font: 12px/1.3 system-ui, 'Microsoft YaHei', sans-serif; color: #e8eefc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+  .htime { font: 10.5px/1.4 system-ui, sans-serif; color: #7f8ea8 }
+  .hrow button { font: 11px/1 system-ui, sans-serif; padding: 4px 9px; border-radius: 8px; border: 1px solid #ffffff33; background: #ffffff14; color: #cfe0ff; cursor: pointer }
+  .hempty { color: #7f8ea8; font: 12px/1.6 system-ui, 'Microsoft YaHei', sans-serif; text-align: center; padding: 22px 0 }  /* ===== 输入条美化：自动长高 + 细滚动条（无上下箭头） ===== */
+  #bar {
+    left: 8px; right: 44px; bottom: 8px;
+    display: flex; align-items: flex-end; gap: 6px;
+    padding: 5px; border-radius: 18px;
+    background: linear-gradient(180deg, #16233aee 0%, #0d1727f2 100%);
+    border: 1px solid #ffffff2e;
+    box-shadow: 0 6px 20px #0008, 0 0 0 1px #0004 inset;
+  }
+  #say {
+    flex: 1; min-width: 0; resize: none; border: none; outline: none;
+    background: transparent; color: #e9f0ff;
+    font: 12.5px/1.5 system-ui, 'Microsoft YaHei', sans-serif;
+    padding: 6px 8px; max-height: 132px; min-height: 26px;
+    overflow-y: auto; scrollbar-width: thin; scrollbar-color: #ffffff38 transparent;
+  }
+  #say::placeholder { color: #7d8ca7 }
+  /* 细滚动条：只有一根滑道，没有上下箭头 */
+  #say::-webkit-scrollbar { width: 3px; height: 3px }
+  #say::-webkit-scrollbar-track { background: transparent }
+  #say::-webkit-scrollbar-thumb { background: #ffffff3d; border-radius: 3px }
+  #say::-webkit-scrollbar-thumb:hover { background: #ffffff66 }
+  #say::-webkit-scrollbar-button { display: none; width: 0; height: 0 }
+  #send {
+    flex: 0 0 auto; width: 30px; height: 30px; margin: 2px; padding: 0; border-radius: 50%;
+    border: 1px solid #ffffff38; background: linear-gradient(180deg, #3b82f6, #2563eb);
+    color: #fff; font-size: 14px; cursor: pointer; box-shadow: 0 2px 8px #0006;
+  }
+  #send.busy { border-radius: 7px; background: linear-gradient(180deg, #e05252, #b93b3b); font-size: 0 }
+  #send.busy::after { content: '■'; font-size: 12px }  /* ===== 圆角修正：气泡小圆角长方形；输入条紧凑 ===== */
+  #bubble { border-radius: 10px !important; }
+  #bubble::after, #bubble::before { display: none !important; }
+  #bar { border-radius: 12px !important; padding: 4px 4px 4px 6px !important; }
+  #say { box-sizing: border-box; height: 30px; min-height: 30px; padding: 5px 7px; border-radius: 8px !important; }  /* 气泡文字可选中复制；拖动改为 Alt+拖（避免抢走文本选择） */
+  #bubble, #bubble * { user-select: text !important; -webkit-user-select: text !important; cursor: text }
+  #bubble { cursor: move }
+  #bubble .msg { cursor: text }</style>
 
 <canvas id="stage"></canvas>
 <div id="bubble"></div>
+<div id="histWrap"><div class="hhead">历史对话<button id="hclose">×</button></div><div id="hist"></div></div>
 <button id="close" title="关闭桌宠（Ctrl+Alt+Q）；Esc 只收气泡">×</button>
 <div id="tip">双击我说话 · 我能帮你开应用、记笔记、设提醒</div>
 <div id="bar">
-  <input id="say" maxlength="200" placeholder="让我帮你做点什么…" autocomplete="off" spellcheck="false">
+  <textarea id="say" rows="1" maxlength="2000" placeholder="让我帮你做点什么…（Enter 发送 · Shift+Enter 换行）" spellcheck="false"></textarea>
   <button id="send" title="发送（回车）">↑</button>
 </div>
 <div id="ask"><div class="q"></div><div class="btns"><button id="askYes">确定</button><button id="askNo">算了</button></div></div>
 <button id="mute" title="语音开关（记住选择）">🔊</button>
+<button id="histbtn" title="历史对话">🕘</button>
 <button id="chatico" title="展开输入（或双击我）">💬</button>
 
 <script type="module">
@@ -453,7 +510,7 @@
   send()
 })
     say.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); send() }
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send() }
       if (e.key === 'Escape') { e.preventDefault(); say.blur(); setBar(false); hideBubble() }
     })
     say.addEventListener('input', () => { lastActivity = Date.now() })
@@ -550,5 +607,88 @@
   }
 
   main().catch((e) => { showBubble(`加载失败：${e.message}`, null, null, true); console.error(e) })
+
+  
+    /* ===== 输入框自动长高（一行 30px 起，超一行才长） ===== */
+  setTimeout(() => {
+    const s = document.getElementById('say')
+    if (!s) return
+    const grow = () => {
+      s.style.height = '30px'
+      const need = s.value ? s.scrollHeight : 30
+      s.style.height = Math.min(Math.max(need, 30), 132) + 'px'
+    }
+    s.addEventListener('input', grow)
+    s.addEventListener('keyup', grow)
+    say.value = ''
+    grow()
+  }, 0)
+  /* ===== 对话历史（写文件到 data/conversations，跨设备可取） ===== */
+  let convId = null
+  function convApi(p, opt) { return fetch(API + p, opt).then((r) => (r.ok ? r.json() : null)).catch(() => null) }
+  async function saveCurrentConv() {
+    if (!history || !history.length) return
+    if (!convId) convId = 'c' + Date.now()
+    const r = await convApi('/convs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: convId, messages: history.slice(-60) }),
+    })
+    if (!r) {   // 代理不在时退回 localStorage，至少不丢
+      try {
+        const k = 'pet:convs'
+        const list = JSON.parse(localStorage.getItem(k) || '[]')
+        const i = list.findIndex((c) => c.id === convId)
+        const item = { id: convId, time: Date.now(), title: '本地暂存', messages: history.slice(-60) }
+        if (i >= 0) list[i] = item; else list.push(item)
+        localStorage.setItem(k, JSON.stringify(list.slice(-40)))
+      } catch (e) { /* ignore */ }
+    }
+  }
+  async function openHistory() {
+    const box = document.getElementById('hist')
+    box.textContent = ''
+    const data = await convApi('/convs')
+    const list = (data && data.list) || []
+    if (!list.length) {
+      const e = document.createElement('div'); e.className = 'hempty'; e.textContent = '还没有历史对话（代理需在线）'
+      box.append(e)
+    }
+    for (const c of list) {
+      const row = document.createElement('div'); row.className = 'hrow'
+      const g = document.createElement('div'); g.className = 'hgrow'
+      const t = document.createElement('div'); t.className = 'htext'; t.textContent = c.title || '（无标题）'
+      const d = document.createElement('div'); d.className = 'htime'
+      d.textContent = new Date(c.time).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' · ' + (c.count || 0) + ' 条'
+      g.append(t, d)
+      const btn = document.createElement('button'); btn.textContent = '打开'
+      btn.onclick = async (ev) => {
+        ev.stopPropagation()
+        const full = await convApi('/convs/' + encodeURIComponent(c.id))
+        if (!full || !full.messages) return
+        history.length = 0
+        for (const m of full.messages) history.push(m)
+        convId = full.id
+        document.getElementById('histWrap').classList.remove('show')
+        const last = [...history].reverse().find((m) => m.role === 'assistant')
+        showBubble(last ? last.content : '（这段没有答复）', '历史对话 · ' + (full.title || ''))
+      }
+      row.append(g, btn)
+      box.append(row)
+    }
+    document.getElementById('histWrap').classList.add('show')
+  }
+  setTimeout(() => {
+    const hb = document.getElementById('histbtn')
+    const hc = document.getElementById('hclose')
+    if (hb) hb.onclick = (e) => { e.stopPropagation(); openHistory() }
+    if (hc) hc.onclick = (e) => { e.stopPropagation(); document.getElementById('histWrap').classList.remove('show') }
+  }, 0)
+  let _lastLen = 0
+  setInterval(() => {
+    try {
+      if (history.length && history.length !== _lastLen) { _lastLen = history.length; saveCurrentConv() }
+    } catch (e) { /* ignore */ }
+  }, 1200)
 </script>
 </html>

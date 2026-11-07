@@ -172,6 +172,18 @@ function createWindow() {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   if (clickThrough) applyClickThrough(true)
 
+  // 右键菜单：透明无边框窗口默认没有菜单，粘贴/复制都用不了
+  win.webContents.on('context-menu', (_e, params) => {
+    const items = []
+    if (params.isEditable) {
+      items.push({ role: 'cut', label: '剪切' }, { role: 'copy', label: '复制' }, { role: 'paste', label: '粘贴' })
+      items.push({ type: 'separator' }, { role: 'selectAll', label: '全选' })
+    } else if (params.selectionText) {
+      items.push({ role: 'copy', label: '复制' })
+    }
+    if (!items.length) items.push({ role: 'copy', label: '复制' }, { role: 'selectAll', label: '全选' })
+    Menu.buildFromTemplate(items).popup({ window: win })
+  })
   win.once('ready-to-show', () => win.show())
   win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     if (!isMainFrame) return
