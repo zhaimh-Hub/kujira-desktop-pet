@@ -178,7 +178,7 @@
 <button id="close" title="关闭桌宠（Ctrl+Alt+Q）；Esc 只收气泡">×</button>
 <div id="tip">双击我说话 · 我能帮你开应用、记笔记、设提醒</div>
 <div id="bar">
-  <textarea id="say" rows="1" maxlength="2000" placeholder="让我帮你做点什么…（Enter 发送 · Shift+Enter 换行）" spellcheck="false"></textarea>
+  <textarea id="say" rows="1" maxlength="2000" placeholder="让我帮你做点什么…" spellcheck="false"></textarea>
   <button id="send" title="发送（回车）">↑</button>
 </div>
 <div id="ask"><div class="q"></div><div class="btns"><button id="askYes">确定</button><button id="askNo">算了</button></div></div>
@@ -407,6 +407,8 @@
       const text = (overrideText || say.value).trim()
       if (!text || thinking) return
       say.value = ''
+      say.style.height = '30px'
+      say.style.height = '30px'
       tip.textContent = ''
       lastActivity = Date.now()
       gotReply = false

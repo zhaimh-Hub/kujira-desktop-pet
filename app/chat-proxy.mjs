@@ -1056,13 +1056,90 @@ function ttsFile(text, voice) {
   return path.join(TTS_DIR, `${h}.mp3`)
 }
 
+// 多语言声线：按文字脚本自动挑 voice（URL 传 voice 时以传入为准）
+const VOICE_MAP = {
+  // 统一走「可爱/少女/童声」声线，各语言尽量挑年轻的
+  zh: 'zh-CN-XiaoyiNeural',            // 少女音（默认）
+  en: 'en-US-AnaNeural',              // 童声，很可爱
+  ja: 'ja-JP-NanamiNeural',           // 少女音
+  ko: 'ko-KR-SunHiNeural',            // 柔和女声
+  fr: 'fr-FR-EloiseNeural',           // 童声
+  de: 'de-DE-AmalaNeural',            // 年轻女声
+  it: 'it-IT-IsabellaNeural',         // 年轻女声
+  pt: 'pt-BR-ThalitaMultilingualNeural',
+  es: 'es-ES-ElviraNeural',           // 成年女声（无可选童声）
+  ru: 'ru-RU-SvetlanaNeural',         // 成年女声
+}
+function pickVoice(text) {
+  const t = String(text || '')
+// 按语言选声线（假名优先：日语里也含汉字，必须先判假名）
+  if (/[\u3040-\u30ff]/.test(t)) return VOICE_MAP.ja
+  if (/[\u4e00-\u9fa5]/.test(t)) return VOICE_MAP.zh
+  if (/[\uac00-\ud7af]/.test(t)) return VOICE_MAP.ko
+  if (/[\u0400-\u04ff]/.test(t)) return VOICE_MAP.ru
+  if (/[áéíóúñ¿¡]/i.test(t)) return VOICE_MAP.es
+  if (/[àâçéèêëîïôûùüÿœ]/i.test(t)) return VOICE_MAP.fr
+  if (/[äöüß]/i.test(t)) return VOICE_MAP.de
+  return VOICE_MAP.en
+}
+
+async function synthOne(text, voice, file) {
+  if (existsSync(file) && statSync(file).size > 1000) return file
+  const exe = existsSync(cfg.tts.exe) ? cfg.tts.exe : 'edge-tts'
+  await new Promise((resolve, reject) => {
+    execFile(exe, ['--voice', voice, '--rate', cfg.tts.rate, '--pitch', cfg.tts.pitch, '--text', text, '--write-media', file],
+      { timeout: 30000, windowsHide: true }, (err, _o, er) => (err ? reject(new Error('edge-tts 失败：' + (er || err.message))) : resolve()))
+  })
+  if (!existsSync(file) || statSync(file).size < 500) throw new Error('edge-tts 没产出音频')
+  return file
+}
+
+// 按句切分，逐句判语种选声线，最后把 mp3 拼接成一段（页面无需改动）
+async function synthMixed(text) {
+  // 朗读前先清掉「括号里的动作/状态」和 emoji：这些不该念出来
+  let clean = String(text)
+    .replace(/（[^）]*）/g, ' ')      // 全角括号
+    .replace(/\([^)]*\)/g, ' ')      // 半角括号
+    .replace(/【[^】]*】/g, ' ')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{1F000}-\u{1F02F}]/gu, ' ')
+    .replace(/[*_~`#]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const parts = (clean.match(/[^。！？!?\n]+[。！？!?]?/g) || [clean]).map((s) => s.trim()).filter(Boolean)
+// 如果整段只有一个声线（中文语境最常见），就整段一次合成，避免拼接导致的「只播了一半」
+  const vs = [...new Set(parts.map((p) => pickVoice(p)))]
+  if (vs.length === 1) {
+    const one = path.join(path.resolve(cfg.dataDir || 'data'), 'tts', 'one-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7) + '.mp3')
+    mkdirSync(path.dirname(one), { recursive: true })
+    await synthOne(clean, vs[0], one)
+    log('整段语音（单声线 ' + vs[0] + '）')
+    return { file: one, cached: false }
+  }
+  const chunks = []
+  const used = []
+  for (const p of parts) {
+    const v = pickVoice(p)
+    const f = ttsFile(p, v)
+    try { await synthOne(p, v, f) } catch (e) { log('分段合成失败(' + v + ')：' + e.message); continue }
+    try { chunks.push(readFileSync(f)); used.push(v) } catch (e) { /* ignore */ }
+  }
+  if (!chunks.length) throw new Error('没有可用音频段')
+  const out = path.join(path.resolve(cfg.dataDir || 'data'), 'tts', 'mix-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7) + '.mp3')
+  mkdirSync(path.dirname(out), { recursive: true })
+  writeFileSync(out, Buffer.concat(chunks))
+  log('分段语音：' + used.length + ' 段，声线 ' + [...new Set(used)].join('/'))
+  return { file: out, cached: false }
+}
+
 async function synthesize(text, voice) {
-  const v = voice || cfg.tts.voice
+  const v = voice || pickVoice(text) || cfg.tts.voice
+  const exe = existsSync(cfg.tts.exe) ? cfg.tts.exe : 'edge-tts'
   const file = ttsFile(text, v)
   if (existsSync(file) && statSync(file).size > 1000) return { file, cached: true }
   if (!existsSync(cfg.tts.exe)) throw new Error(`找不到 edge-tts：${cfg.tts.exe}`)
   await new Promise((resolve, reject) => {
-    execFile(cfg.tts.exe, ['--voice', v, '--rate', cfg.tts.rate, '--pitch', cfg.tts.pitch, '--text', text, '--write-media', file],
+    execFile(exe, ['--voice', v, '--rate', cfg.tts.rate, '--pitch', cfg.tts.pitch, '--text', text, '--write-media', file],
       { timeout: 30000, windowsHide: true }, (err, _o, er) => (err ? reject(new Error(`edge-tts 失败：${er || err.message}`)) : resolve()))
   })
   if (!existsSync(file) || statSync(file).size < 500) throw new Error('edge-tts 没产出音频')
@@ -1190,10 +1267,13 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && url.pathname === '/tts') {
-      const text = (url.searchParams.get('text') || '').slice(0, 400)
+      const text = (url.searchParams.get('text') || '').slice(0, 2000)
       if (!text) return json(res, 400, { error: 'text 不能为空' })
       const t0 = Date.now()
-      const { file, cached } = await synthesize(text, url.searchParams.get('voice') || undefined)
+      const forcedVoice = url.searchParams.get('voice') || ''
+      let file, cached
+      if (forcedVoice) { const r0 = await synthesize(text, forcedVoice); file = r0.file; cached = r0.cached }
+      else { const r1 = await synthMixed(text); file = r1.file; cached = r1.cached }
       res.writeHead(200, {
         'content-type': 'audio/mpeg',
         'content-length': statSync(file).size,
@@ -1254,10 +1334,11 @@ const server = createServer(async (req, res) => {
             const _lastMsg = ([...history].reverse().find((m) => m.role === 'user') || {}).content || ''
       const _hasCJK = /[\u4e00-\u9fa5]/.test(_lastMsg)
       const _wantLang = cfg.lang === 'zh' ? 'zh' : cfg.lang === 'en' ? 'en' : (_hasCJK ? 'zh' : 'en')
+      const TTS_RULE = '你会说话：文字由页面自动朗读。禁止说「我没法出声」「没有语音引擎」「开个朗读软件」或「你念出来」这类话；用户要听外语就直接用那门语言写（中英日韩法德意西葡俄都支持），页面会用对应声线朗读。'
       const LANG_RULE = _wantLang === 'en'
         ? 'LANGUAGE OVERRIDE: reply in English only. Ignore any instruction above that mentions Chinese.'
         : '语言强制：这一条只能用简体中文回答。忽略上面任何要求用英文的表述。'
-      const sysParts = Array.isArray(cfg.systemPrompt) ? [...cfg.systemPrompt, LANG_RULE] : [cfg.systemPrompt, LANG_RULE]
+      const sysParts = Array.isArray(cfg.systemPrompt) ? [...cfg.systemPrompt, LANG_RULE, TTS_RULE] : [cfg.systemPrompt, LANG_RULE, TTS_RULE]
 const msgs = [{ role: 'system', content: sysParts.join(String.fromCharCode(10)) }, ...history.map((m) => ({ role: m.role, content: m.content }))]
       const lastUser = [...(body.messages || [])].reverse().find((m) => m.role === 'user')?.content || ''
       const short = String(lastUser).trim()
